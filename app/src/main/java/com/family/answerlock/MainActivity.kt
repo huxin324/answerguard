@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（测试不会开始计时）", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
+        findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
@@ -120,6 +121,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 守护已开启但服务死了（被系统杀/冻结后闹钟还没到）→ 打开 App 时立刻自动拉起，
+        // 同时把闹钟重新排上，保证回到后台后还能继续弹题
+        if (prefs.getBoolean("guardOn", false) && !QuizService.running) {
+            QuizService.start(this)
+        }
         updateStatus()
         uiHandler.post(refresher)
     }
@@ -191,10 +197,61 @@ class MainActivity : AppCompatActivity() {
         QuizService.start(this)
         updateStatus()
         Toast.makeText(this, "✅ 守护已启动，可以放心把手机交给孩子了", Toast.LENGTH_LONG).show()
-        // 启动后如果还没做省电豁免，顺手引导一下（不做也不影响启动）
+        // 启动后如果还没做省电豁免，直接弹出系统授权对话框（这一项是后台不被冻结的关键）
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            Toast.makeText(this, "提示：还有「省电豁免」没开，点「🔧 一键修复权限」补上更稳", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                Toast.makeText(this, "请点「允许」——不让系统冻结后台，离开 App 才能正常弹题", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "提示：请点「🔧 一键修复权限」把「省电豁免」补上", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * 直达华为「应用启动管理」页面：把自启动/关联启动/后台活动三项打开，
+     * 这是华为手机防止 App 后台被冻结、闹钟被压住的官方开关。
+     */
+    private fun openHuaweiStartup() {
+        val candidates = listOf(
+            android.content.ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+            ),
+            android.content.ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"
+            ),
+            android.content.ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.optimize.process.ProtectActivity"
+            )
+        )
+        for (cn in candidates) {
+            try {
+                startActivity(Intent().setComponent(cn))
+                Toast.makeText(
+                    this,
+                    "找到「答题守护」→ 关掉「自动管理」→ 三项全开，然后回来点「启动守护」",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            } catch (e: Exception) { /* 试下一个入口 */ }
+        }
+        // 都打不开 → 退回应用详情页，手动找「电池启动管理」
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+            )
+            Toast.makeText(this, "在应用信息里找「电池/启动管理」，把自启动和后台活动打开", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "请手动到 设置→应用和服务→应用启动管理→答题守护 打开三项", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -253,8 +310,8 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         statusTv.text = if (on) {
             val remain = prefs.getInt("remaining", 0)
-            "v1.4 · 🟢 守护运行中（闹钟驱动） · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.4 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v1.5 · 🟢 守护运行中（闹钟驱动） · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.5 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
         // 下次弹题时间由系统闹钟保管，按时间戳计算剩余秒数（进程被冻结也不丢）
         val at = prefs.getLong("nextQuizAt", 0L)
