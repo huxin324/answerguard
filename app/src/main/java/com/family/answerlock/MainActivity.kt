@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -170,13 +171,28 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         statusTv.text = if (on) {
             val remain = prefs.getInt("remaining", 0)
-            "🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "⚪ 未启动"
+            "v1.1 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.1 · ⚪ 未启动（悬浮窗模式）"
+
+        statusTv.text = statusTv.text.toString() + "\n" + selfCheck()
 
         val total = prefs.getInt("total", 0)
         val ok = prefs.getInt("ok", 0)
         val no = prefs.getInt("no", 0)
         statsTv.text = if (total == 0) "累计答题 0 · 正确率 --"
         else "累计答题 $total · 答对 $ok · 答错 $no · 正确率 ${ok * 100 / total}%"
+    }
+
+    /** 权限自检：哪一项是 ❌，就去系统里把那一项打开 */
+    private fun selfCheck(): String {
+        val overlay = if (Settings.canDrawOverlays(this)) "✅" else "❌"
+        val notif = if (Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) "✅" else "❌"
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
+        val alive = if (QuizService.running) "✅" else "❌"
+        return "自检 悬浮窗 $overlay 通知 $notif 省电豁免 $battery 服务 $alive"
     }
 }

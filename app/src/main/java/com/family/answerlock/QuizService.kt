@@ -121,6 +121,7 @@ class QuizService : Service() {
         super.onCreate()
         prefs = getSharedPreferences("guard", MODE_PRIVATE)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        running = true
 
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -182,6 +183,7 @@ class QuizService : Service() {
         ui.removeCallbacks(nextRunnable)
         speakRunnable?.let { ui.removeCallbacks(it) }
         closeOverlay()
+        running = false
         soundPool?.release()
         tts?.stop()
         tts?.shutdown()
@@ -478,6 +480,18 @@ class QuizService : Service() {
     companion object {
         const val CHANNEL_ID = "guard"
         const val ACTION_TEST = "com.family.answerlock.TEST"
+
+        /**
+         * 兼容字段：旧版的 QuizActivity 引用过它。
+         * 新版答题界面已改为悬浮窗，该界面类已废弃；保留此字段是为了让还留在工程里的
+         * 旧文件仍能编译通过（不用手动删文件）。
+         */
+        @Volatile
+        var quizOpen = false
+
+        /** 服务是否活着（家长页自检用） */
+        @Volatile
+        var running = false
 
         fun start(context: android.content.Context) {
             context.startForegroundService(
