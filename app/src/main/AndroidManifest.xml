@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 后台常驻通知 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 前台服务：保证 App 被切到后台后计时仍然运行 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 悬浮窗：允许在任何 App 上面弹出答题窗口（核心权限） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:allowBackup="true"
+        android:label="答题守护"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AnswerLock">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 全局答题弹窗：透明全屏，盖在任意 App 之上 -->
+        <activity
+            android:name=".QuizActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AnswerLock.Translucent" />
+
+        <service
+            android:name=".QuizService"
+            android:exported="false" />
+    </application>
+
+</manifest>

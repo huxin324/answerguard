@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主界面 -->
+    <style name="Theme.AnswerLock" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:statusBarColor">#F5F6F8</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!-- 全局答题弹窗：透明全屏 -->
+    <style name="Theme.AnswerLock.Translucent" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

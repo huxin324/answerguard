@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F6F8">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🛡️ 答题守护 · 家长设置"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="#1F2430" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:text="孩子玩手机时自动弹题，答对继续玩，答错加题"
+            android:textSize="13sp"
+            android:textColor="#7A8194" />
+
+        <!-- 出题科目 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="出题科目"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="6dp">
+
+            <CheckBox
+                android:id="@+id/chkMath"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🧮 数学" />
+
+            <CheckBox
+                android:id="@+id/chkChinese"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="📖 语文" />
+
+            <CheckBox
+                android:id="@+id/chkEnglish"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🔤 英语" />
+        </LinearLayout>
+
+        <CheckBox
+            android:id="@+id/voiceChk"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:checked="true"
+            android:text="🔊 答错时语音讲解（系统语音，离线可用）" />
+
+        <!-- 各项设置 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="孩子年级（自动匹配教材进度）"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/gradeSp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:id="@+id/autoTv"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="📚 已自动匹配：按人教版知识点出题"
+            android:textSize="13sp"
+            android:textColor="#2F6BFF" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="弹题间隔（每玩多久弹一次）"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/intervalSp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="答题倒计时（超时算答错）"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/quizTimeSp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="答错追加题数"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/penaltySp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="今日最长可玩（用完锁屏）"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/dailySp"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="家长解锁密码（锁屏时用）"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/pwdEt"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="默认 1234"
+            android:inputType="textPassword"
+            android:maxLength="8" />
+
+        <!-- 按钮 -->
+        <Button
+            android:id="@+id/startBtn"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="18dp"
+            android:backgroundTint="#2F6BFF"
+            android:text="▶️ 启动守护（进入后台运行）"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/testBtn"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:text="🔔 测试弹题效果" />
+
+        <Button
+            android:id="@+id/stopBtn"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#EEEEEE"
+            android:text="⏹️ 停止守护"
+            android:textColor="#1F2430" />
+
+        <!-- 状态与统计 -->
+        <TextView
+            android:id="@+id/statusTv"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="⚪ 未启动"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statsTv"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="累计答题 0 · 正确率 --"
+            android:textSize="13sp"
+            android:textColor="#7A8194" />
+
+        <!-- 使用说明 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:lineSpacingExtra="4dp"
+            android:text="📱 使用流程：\n1. 首次使用请按提示打开「显示在其他应用上层」权限\n2. 设置好规则 → 点「启动守护」→ 把手机交给孩子\n3. 到时间会在任何 App 上面弹出答题窗\n4. 时长用完自动锁屏，凭家长密码解锁\n\n⚠️ 建议：把本 App 加入手机自带的「应用锁」，防止孩子强行卸载；关闭其他后台清理对它的拦截。"
+            android:textSize="13sp"
+            android:textColor="#7A8194" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="30dp" />
+    </LinearLayout>
+</ScrollView>
