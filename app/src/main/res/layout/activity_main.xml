@@ -202,6 +202,16 @@
             android:textColor="#B26A00" />
 
         <Button
+            android:id="@+id/a11yBtn"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#8B5CF6"
+            android:text="🔑 开启无障碍守护（最关键，必开）"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp" />
+
+        <Button
             android:id="@+id/huaweiBtn"
             android:layout_width="match_parent"
             android:layout_height="48dp"

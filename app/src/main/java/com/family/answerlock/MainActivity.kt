@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
-import android.os.SystemClock
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -107,8 +106,25 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（测试不会开始计时）", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
+        findViewById<Button>(R.id.a11yBtn).setOnClickListener { openA11y() }
         findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请先打开「显示在其他应用上层」权限", Toast.LENGTH_LONG).show()
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                )
+                return@setOnClickListener
+            }
+            if (!GuardAccessibilityService.isEnabled(this)) {
+                Toast.makeText(
+                    this,
+                    "先开「无障碍」再测：不开的话切到抖音会被系统冻结，测不出真实效果",
+                    Toast.LENGTH_LONG
+                ).show()
+                GuardAccessibilityService.openSettings(this)
+                return@setOnClickListener
+            }
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
             QuizService.start(this)
@@ -124,7 +140,7 @@ class MainActivity : AppCompatActivity() {
         // 守护已开启但服务死了（被系统杀/冻结后闹钟还没到）→ 打开 App 时立刻自动拉起，
         // 同时把闹钟重新排上，保证回到后台后还能继续弹题
         if (prefs.getBoolean("guardOn", false) && !QuizService.running) {
-            QuizService.start(this)
+            QuizService.resume(this)
         }
         updateStatus()
         uiHandler.post(refresher)
@@ -193,11 +209,25 @@ class MainActivity : AppCompatActivity() {
         ) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+
         saveConfig()
         QuizService.start(this)
         updateStatus()
+
+        // 3. 无障碍。华为/鸿蒙会冻结后台 App，冻结期间闹钟不投递 —— 这是「离开 App 就不弹」的根因。
+        //    只有开启无障碍，守护才不会被冻结。所以这一项没开就先带家长去开。
+        if (!GuardAccessibilityService.isEnabled(this)) {
+            Toast.makeText(
+                this,
+                "还差最后一步：找到「答题守护」打开无障碍开关。不开这一项，离开 App 就不会弹题。",
+                Toast.LENGTH_LONG
+            ).show()
+            GuardAccessibilityService.openSettings(this)
+            return
+        }
+
         Toast.makeText(this, "✅ 守护已启动，可以放心把手机交给孩子了", Toast.LENGTH_LONG).show()
-        // 启动后如果还没做省电豁免，直接弹出系统授权对话框（这一项是后台不被冻结的关键）
+        // 4. 省电豁免（第二重保险）
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
             try {
@@ -212,6 +242,20 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "提示：请点「🔧 一键修复权限」把「省电豁免」补上", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /** 一键跳到系统无障碍设置页（最关键的开关：开了它守护才不会被冻结） */
+    private fun openA11y() {
+        if (GuardAccessibilityService.isEnabled(this)) {
+            Toast.makeText(this, "✅ 无障碍守护已开启，离开 App 也能准时弹题", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(
+            this,
+            "在列表里找到「答题守护」→ 打开开关 → 弹窗点「允许」。开好后回来自检会变成 ✅",
+            Toast.LENGTH_LONG
+        ).show()
+        GuardAccessibilityService.openSettings(this)
     }
 
     /**
@@ -302,31 +346,50 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
+        // ④ 无障碍（最关键：不用它，后台进程会被鸿蒙冻结，闹钟不投递 → 离开 App 就不弹）
+        if (!GuardAccessibilityService.isEnabled(this)) {
+            Toast.makeText(
+                this,
+                "④ 找到「答题守护」打开无障碍开关（最关键的一项）",
+                Toast.LENGTH_LONG
+            ).show()
+            GuardAccessibilityService.openSettings(this)
+            return
+        }
         updateStatus()
-        Toast.makeText(this, "✅ 权限都齐了，点「▶️ 启动守护」就可以把手机交给孩子", Toast.LENGTH_LONG).show()
+        Toast.makeText(
+            this,
+            "✅ 权限都齐了：点「▶️ 启动守护」，然后切到抖音等它弹题",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     private fun updateStatus() {
         val on = prefs.getBoolean("guardOn", false)
+        val remain = GuardCore.remaining(this)
         statusTv.text = if (on) {
-            val remain = prefs.getInt("remaining", 0)
-            "v1.5 · 🟢 守护运行中（闹钟驱动） · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.5 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v1.6 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.6 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
-        // 下次弹题时间由系统闹钟保管，按时间戳计算剩余秒数（进程被冻结也不丢）
-        val at = prefs.getLong("nextQuizAt", 0L)
+        // 倒计时按「时间戳账本」算，进程被冻结也不会错
         val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"
-        val cd = if (on && at > 0) {
-            val sec = ((at - SystemClock.elapsedRealtime()) / 1000L).toInt().coerceAtLeast(0)
-            "距离下次弹题 $sec 秒"
-        } else "未计时"
-        statusTv.text = statusTv.text.toString() + "\n" + selfCheck() + "\n" + cd + " · 上次：$diagTxt"
+        val cd = if (on) "距离下次弹题 ${GuardCore.nextInSec(this)} 秒（${GuardCore.modeText(this)}）" else "未计时"
+        statusTv.text = statusTv.text.toString() + "\n" + selfCheck() + "\n" + beatText() + "\n" + cd + "\n上次：" + diagTxt
 
         val total = prefs.getInt("total", 0)
         val ok = prefs.getInt("ok", 0)
         val no = prefs.getInt("no", 0)
         statsTv.text = if (total == 0) "累计答题 0 · 正确率 --"
         else "累计答题 $total · 答对 $ok · 答错 $no · 正确率 ${ok * 100 / total}%"
+    }
+
+    /** 心跳自检：直接告诉家长「守护进程有没有被系统冻结」 */
+    private fun beatText(): String {
+        val b = GuardCore.lastBeat
+        if (b == 0L) return "心跳 —（还没跳，点「启动守护」）"
+        val ago = ((System.currentTimeMillis() - b) / 1000L).toInt()
+        return if (ago <= 3) "心跳 ✅ ${ago} 秒前跳动，守护进程活着"
+        else "心跳 ⚠️ 已 ${ago} 秒没跳：进程被系统冻结 → 开无障碍 + 电池不限制"
     }
 
     /** 权限自检：哪一项是 ❌，就去系统里把那一项打开 */
@@ -338,7 +401,8 @@ class MainActivity : AppCompatActivity() {
         ) "✅" else "❌"
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
+        val a11y = if (GuardAccessibilityService.isEnabled(this)) "✅" else "❌"
         val alive = if (QuizService.running) "✅" else "❌"
-        return "自检 悬浮窗 $overlay 通知 $notif 省电豁免 $battery 服务 $alive"
+        return "自检 弹窗 $overlay 通知 $notif 省电 $battery 无障碍 $a11y 服务 $alive"
     }
 }

@@ -3,15 +3,15 @@
 
     <!-- 后台常驻通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 前台服务：保证 App 被切到后台后计时仍然运行 -->
+    <!-- 前台服务：提高进程优先级 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- 悬浮窗：允许在任何 App 上面弹出答题窗口（核心权限） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- 申请「电池优化白名单」，防止后台守护服务被系统杀掉 -->
+    <!-- 电池优化白名单，防止后台服务被系统杀掉 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- 精确闹钟：到点弹题由系统闹钟驱动，进程被冻结/杀掉也能准时唤醒（核心机制） -->
+    <!-- 精确闹钟（第二重保险） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- 开机自启：重启手机后自动恢复守护 -->
+    <!-- 开机自启 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
@@ -30,10 +30,28 @@
         </activity>
 
         <!--
-            答题界面已改为悬浮窗方案（WindowManager 直接绘制，不启动 Activity），
-            不再需要 QuizActivity：华为/鸿蒙限制「后台启动界面」会导致弹不出来，
-            悬浮窗方案只要「显示在其他应用上层」权限即可，且上划任务列表滑不掉。
+            答题界面是 WindowManager 悬浮窗（不启动 Activity）：
+            华为/鸿蒙限制「后台启动界面」，Activity 弹不出来；悬浮窗只要
+            「显示在其他应用上层」权限即可，且上划任务列表滑不掉。
         -->
+
+        <!--
+            无障碍守护服务（v1.6 核心）：
+            由系统绑定并常驻，不会被鸿蒙「后台冻结」，用它的 Handler 每秒心跳来计时，
+            从而做到离开 App 也能准时弹题。
+        -->
+        <service
+            android:name=".GuardAccessibilityService"
+            android:exported="true"
+            android:label="答题守护"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <receiver
             android:name=".RestartReceiver"
