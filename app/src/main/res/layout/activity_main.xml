@@ -183,6 +183,15 @@
             android:text="⏹️ 停止守护"
             android:textColor="#1F2430" />
 
+        <Button
+            android:id="@+id/fixBtn"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#FFF4E5"
+            android:text="🔧 一键修复权限（缺哪项修哪项）"
+            android:textColor="#B26A00" />
+
         <!-- 状态与统计 -->
         <TextView
             android:id="@+id/statusTv"

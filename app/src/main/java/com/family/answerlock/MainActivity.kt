@@ -103,8 +103,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.testBtn).setOnClickListener {
             saveConfig()
             QuizService.test(this)
-            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（测试不会开始计时）", Toast.LENGTH_SHORT).show()
         }
+        findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
     }
 
     override fun onResume() {
@@ -165,14 +166,70 @@ class MainActivity : AppCompatActivity() {
         QuizService.start(this)
         updateStatus()
         Toast.makeText(this, "✅ 守护已启动，可以放心把手机交给孩子了", Toast.LENGTH_LONG).show()
+        // 启动后如果还没做省电豁免，顺手引导一下（不做也不影响启动）
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            Toast.makeText(this, "提示：还有「省电豁免」没开，点「🔧 一键修复权限」补上更稳", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 一键修复：每次点修第一个还缺的权限，修完一项再点一次 */
+    private fun fixNext() {
+        // ① 悬浮窗（全局弹窗的核心）
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            )
+            Toast.makeText(this, "① 打开「允许显示在其他应用上层」，返回后再点一次", Toast.LENGTH_LONG).show()
+            return
+        }
+        // ② 通知（前台服务常驻通知）
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                )
+                Toast.makeText(this, "② 把「通知」开关打开，返回后再点一次", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            }
+            return
+        }
+        // ③ 省电豁免（防止后台服务被杀）
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                Toast.makeText(this, "③ 点「允许」别限制后台，返回后再点一次", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    Toast.makeText(this, "③ 找到「答题守护」→ 选「不受限制」", Toast.LENGTH_LONG).show()
+                } catch (e2: Exception) {
+                    Toast.makeText(this, "请手动到 设置→电池→应用耗电管理 选「不受限制」", Toast.LENGTH_LONG).show()
+                }
+            }
+            return
+        }
+        updateStatus()
+        Toast.makeText(this, "✅ 权限都齐了，点「▶️ 启动守护」就可以把手机交给孩子", Toast.LENGTH_LONG).show()
     }
 
     private fun updateStatus() {
         val on = prefs.getBoolean("guardOn", false)
         statusTv.text = if (on) {
             val remain = prefs.getInt("remaining", 0)
-            "v1.1 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.1 · ⚪ 未启动（悬浮窗模式）"
+            "v1.2 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.2 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
         statusTv.text = statusTv.text.toString() + "\n" + selfCheck()
 
