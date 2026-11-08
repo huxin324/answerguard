@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -106,11 +107,35 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（测试不会开始计时）", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
+        findViewById<Button>(R.id.test10Btn).setOnClickListener {
+            saveConfig()
+            prefs.edit().putInt("intervalSec", 10).apply()
+            QuizService.start(this)
+            updateStatus()
+            Toast.makeText(
+                this, "已启动守护，10 秒后自动弹题——请立刻切到抖音等着", Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     override fun onResume() {
         super.onResume()
         updateStatus()
+        uiHandler.post(refresher)
+    }
+
+    override fun onPause() {
+        uiHandler.removeCallbacks(refresher)
+        super.onPause()
+    }
+
+    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /** 每秒刷新状态，让家长看到「下次弹题 X 秒」真的在倒数 */
+    private val refresher = object : Runnable {
+        override fun run() {
+            updateStatus()
+            uiHandler.postDelayed(this, 1000)
+        }
     }
 
     private fun makeAdapter(data: List<String>) =
@@ -228,10 +253,17 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         statusTv.text = if (on) {
             val remain = prefs.getInt("remaining", 0)
-            "v1.2 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.2 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v1.4 · 🟢 守护运行中（闹钟驱动） · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.4 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
-        statusTv.text = statusTv.text.toString() + "\n" + selfCheck()
+        // 下次弹题时间由系统闹钟保管，按时间戳计算剩余秒数（进程被冻结也不丢）
+        val at = prefs.getLong("nextQuizAt", 0L)
+        val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"
+        val cd = if (on && at > 0) {
+            val sec = ((at - SystemClock.elapsedRealtime()) / 1000L).toInt().coerceAtLeast(0)
+            "距离下次弹题 $sec 秒"
+        } else "未计时"
+        statusTv.text = statusTv.text.toString() + "\n" + selfCheck() + "\n" + cd + " · 上次：$diagTxt"
 
         val total = prefs.getInt("total", 0)
         val ok = prefs.getInt("ok", 0)

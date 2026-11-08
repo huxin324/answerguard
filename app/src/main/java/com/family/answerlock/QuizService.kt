@@ -33,6 +33,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -85,35 +87,12 @@ class QuizService : Service() {
     private val UTTER_EXPLAIN = "explain"
     private val WRONG_SOUND_MS = 500L
 
-    /* ---------------- 计时 ---------------- */
-
-    private val tick = object : Runnable {
-        override fun run() {
-            // 答题/锁屏悬浮窗打开期间暂停计时（作答不白扣玩耍时间）
-            if (overlayRoot == null) {
-                val e = prefs.edit()
-                var remaining = prefs.getInt("remaining", 0)
-                var next = prefs.getInt("nextQuizIn", 0)
-                val quizTime = prefs.getInt("quizTimeSec", 60)
-
-                if (remaining > 0) remaining--
-                next--
-
-                when {
-                    // 今日时间用完 → 锁屏
-                    remaining <= 0 -> {
-                        e.putInt("remaining", 0).putBoolean("locked", true).apply()
-                        showOverlay("lock")
-                    }
-                    // 正常到点 → 弹题
-                    next <= 0 -> showOverlay("quiz")
-                }
-
-                e.putInt("remaining", remaining).putInt("nextQuizIn", next).apply()
-            }
-            handler.postDelayed(this, 1000)
-        }
-    }
+    /* ---------------- 计时（系统闹钟驱动） ----------------
+     * 关键设计：不靠进程内 Handler 每秒数秒——华为会把后台进程冻结，Handler 一停计时就中断。
+     * 改用 AlarmManager 精确闹钟：即使进程被冻结/杀掉，系统也会准时唤醒服务弹题。
+     * remaining（今日剩余秒数）用「时间戳差值」结算（时间戳持久化，进程死了也不丢），
+     * 闹钟隔多久响都不影响准确性。
+     */
 
     /* ================= 生命周期 ================= */
 
@@ -145,20 +124,120 @@ class QuizService : Service() {
         when (intent?.action) {
             // 家长点「测试弹题效果」：只弹窗，不动计时
             ACTION_TEST -> showOverlay("quiz")
-            // 正式启动守护：重置为全新的一天
+            // 系统闹钟到点：结算时间、弹题或锁屏
+            ACTION_TICK -> handleTick()
+            // 正式启动守护：家长首次启动 → 重置为全新的一天；进程被杀后的自动恢复 → 继续计时
             else -> {
-                prefs.edit()
-                    .putInt("remaining", prefs.getInt("dailyMin", 30) * 60)
-                    .putInt("nextQuizIn", prefs.getInt("intervalSec", 60))
-                    .putBoolean("locked", false)
-                    .putInt("pending", 0)
-                    .putBoolean("guardOn", true)
-                    .apply()
-                handler.removeCallbacks(tick)
-                handler.post(tick)
+                val now = SystemClock.elapsedRealtime()
+                if (!prefs.getBoolean("guardOn", false)) {
+                    // 全新启动
+                    prefs.edit()
+                        .putInt("remaining", prefs.getInt("dailyMin", 30) * 60)
+                        .putBoolean("locked", false)
+                        .putInt("pending", 0)
+                        .putLong("lastTickAt", now)
+                        .putBoolean("guardOn", true)
+                        .apply()
+                    scheduleNextQuiz(prefs.getInt("intervalSec", 60))
+                    diag("守护已启动")
+                } else {
+                    // 服务被系统杀掉后自动恢复：把「死掉期间」的时间照常扣掉，防止孩子强停 App 绕过
+                    val last = prefs.getLong("lastTickAt", now)
+                    val gone = ((now - last) / 1000L).toInt().coerceAtLeast(0)
+                    val remaining = (prefs.getInt("remaining", 0) - gone).coerceAtLeast(0)
+                    prefs.edit()
+                        .putInt("remaining", remaining)
+                        .putLong("lastTickAt", now)
+                        .putBoolean("guardOn", true)
+                        .apply()
+                    val interval = prefs.getInt("intervalSec", 60)
+                    scheduleNextQuiz(minOf(interval, remaining).coerceAtLeast(5))
+                    diag("守护自动恢复（已扣 $gone 秒）")
+                }
             }
         }
         return START_STICKY
+    }
+
+    /** 闹钟到点：结算这一段玩了多少秒 → 时间用完锁屏，否则弹题 */
+    private fun handleTick() {
+        if (!prefs.getBoolean("guardOn", false)) return
+
+        // 正在答题/锁屏：时间暂停（作答不白扣玩耍时间），过会儿再检查
+        if (overlayRoot != null) {
+            scheduleNextQuiz(15)
+            return
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        val last = prefs.getLong("lastTickAt", now)
+        val elapsed = ((now - last) / 1000L).toInt().coerceAtLeast(0)
+        prefs.edit().putLong("lastTickAt", now).apply()
+
+        val remaining = prefs.getInt("remaining", 0) - elapsed
+        if (remaining <= 0) {
+            // 今日时间用完 → 锁屏
+            prefs.edit().putInt("remaining", 0).putBoolean("locked", true).apply()
+            showOverlay("lock")
+        } else {
+            prefs.edit().putInt("remaining", remaining).apply()
+            showOverlay("quiz")
+        }
+        // 弹窗失败（如悬浮窗权限被关）→ 30 秒后自动重试，守护不会悄悄死掉
+        if (overlayRoot == null) scheduleNextQuiz(30)
+    }
+
+    /**
+     * 用系统精确闹钟排下一次弹题。
+     * 就算 App 进程此刻已被华为冻结甚至杀掉，闹钟到点系统也会唤醒服务——这就是
+     * 「离开 App 计时不再中断」的核心。
+     */
+    private fun scheduleNextQuiz(delaySec: Int) {
+        val at = SystemClock.elapsedRealtime() + delaySec * 1000L
+        prefs.edit().putLong("nextQuizAt", at).apply()
+        val intent = Intent(this, QuizService::class.java).setAction(ACTION_TICK)
+        val pi = if (Build.VERSION.SDK_INT >= 26)
+            PendingIntent.getForegroundService(
+                this, 2001, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        else
+            PendingIntent.getService(
+                this, 2001, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        val am = getSystemService(ALARM_SERVICE) as AlarmManager
+        try {
+            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+        } catch (e: Exception) {
+            // 部分系统对精确闹钟有权限限制，退化为允许休眠的非精确闹钟（仍然能唤醒）
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+        }
+    }
+
+    private fun cancelQuizAlarm() {
+        val intent = Intent(this, QuizService::class.java).setAction(ACTION_TICK)
+        val pi = if (Build.VERSION.SDK_INT >= 26)
+            PendingIntent.getForegroundService(
+                this, 2001, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        else
+            PendingIntent.getService(
+                this, 2001, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        (getSystemService(ALARM_SERVICE) as AlarmManager).cancel(pi)
+    }
+
+    /** 答题窗关闭（答对/解锁）后：重新开始计时并排下一次弹题 */
+    private fun resumeAfterQuiz() {
+        if (!prefs.getBoolean("guardOn", false)) return
+        prefs.edit().putLong("lastTickAt", SystemClock.elapsedRealtime()).apply()
+        val interval = prefs.getInt("intervalSec", 60)
+        val remaining = prefs.getInt("remaining", 0)
+        // 剩余时间不足一个间隔时，到点直接锁屏
+        scheduleNextQuiz(minOf(interval, remaining).coerceAtLeast(5))
     }
 
     /** 孩子上划划掉 App 后，自动拉起服务（配合系统的「允许自启动」设置） */
@@ -178,7 +257,7 @@ class QuizService : Service() {
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(tick)
+        val wasGuarding = prefs.getBoolean("guardOn", false)
         answerTimer?.cancel()
         ui.removeCallbacks(nextRunnable)
         speakRunnable?.let { ui.removeCallbacks(it) }
@@ -187,7 +266,10 @@ class QuizService : Service() {
         soundPool?.release()
         tts?.stop()
         tts?.shutdown()
-        prefs.edit().putBoolean("guardOn", false).apply()
+        // 只有家长主动「停止守护」才清除 guardOn；
+        // 如果是系统杀进程（wasGuarding=true），保持 guardOn，
+        // 之前排下的系统闹钟到点会重新唤醒服务，守护自动恢复
+        if (!wasGuarding) prefs.edit().putBoolean("guardOn", false).apply()
         super.onDestroy()
     }
 
@@ -198,9 +280,15 @@ class QuizService : Service() {
     /* ================= 悬浮窗 ================= */
 
     private fun showOverlay(mode: String) {
-        if (!Settings.canDrawOverlays(this)) return
+        if (!Settings.canDrawOverlays(this)) {
+            diag("失败：没有悬浮窗权限")
+            return
+        }
         // 已经开着就不再叠加
-        if (overlayRoot != null) return
+        if (overlayRoot != null) {
+            diag("窗口已存在，跳过")
+            return
+        }
 
         val root = LayoutInflater.from(this)
             .inflate(R.layout.activity_quiz, null) as FrameLayout
@@ -241,10 +329,32 @@ class QuizService : Service() {
             ).apply { gravity = Gravity.CENTER })
         } catch (e: Exception) {
             overlayRoot = null
+            diag("失败：${e.javaClass.simpleName} ${e.message}")
             return
         }
 
+        diag("已弹出（$mode）")
         if (mode == "lock") showLock() else nextQuestion()
+    }
+
+    /** 记录最近一次弹窗结果，家长页可见，方便定位「为什么不弹」 */
+    private fun diag(msg: String) {
+        val t = SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(Date())
+        prefs.edit().putString("diag", "$t $msg").apply()
+        // 同步写到通知栏：孩子玩别的 App 时下拉通知栏也能看到弹没弹
+        updateNotification("$t $msg")
+    }
+
+    private fun updateNotification(txt: String) {
+        try {
+            val n = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+                .setContentTitle("答题守护运行中")
+                .setContentText(txt)
+                .setOngoing(true)
+                .build()
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(1, n)
+        } catch (e: Exception) { /* 通知失败不影响弹窗 */ }
     }
 
     private fun closeOverlay() {
@@ -254,8 +364,12 @@ class QuizService : Service() {
         overlayRoot?.let {
             try { wm.removeView(it) } catch (e: Exception) { /* 已移除 */ }
         }
+        val wasShowing = overlayRoot != null
         overlayRoot = null
         overlayMode = null
+        // 答题/锁屏窗关闭 → 恢复计时并排下一次闹钟（即使此刻服务正被系统销毁，
+        // 闹钟也已交给系统保管，到点会重新唤醒服务，守护不会因为进程被杀而中断）
+        if (wasShowing) resumeAfterQuiz()
     }
 
     /* ================= 答题逻辑 ================= */
@@ -329,7 +443,6 @@ class QuizService : Service() {
                 ui.postDelayed({ nextQuestion() }, 1600)
             } else {
                 feedbackTv?.text = "✅ 答对了！可以继续玩～"
-                resetQuizTimer()
                 ui.postDelayed({ closeOverlay() }, 1000)
             }
         } else {
@@ -399,11 +512,6 @@ class QuizService : Service() {
         if (id != 0) soundPool?.play(id, 1f, 1f, 1, 0, 1f)
     }
 
-    /** 答题结束，重新开始下一轮弹题倒计时 */
-    private fun resetQuizTimer() {
-        prefs.edit().putInt("nextQuizIn", prefs.getInt("intervalSec", 60)).apply()
-    }
-
     private fun addStat(key: String) {
         prefs.edit()
             .putInt("total", prefs.getInt("total", 0) + 1)
@@ -423,7 +531,6 @@ class QuizService : Service() {
                 prefs.edit()
                     .putBoolean("locked", false)
                     .putInt("remaining", prefs.getInt("dailyMin", 30) * 60)
-                    .putInt("nextQuizIn", prefs.getInt("intervalSec", 60))
                     .putInt("pending", 0)
                     .apply()
                 Toast.makeText(this, "✅ 已解锁，重新开始计时", Toast.LENGTH_SHORT).show()
@@ -480,6 +587,8 @@ class QuizService : Service() {
     companion object {
         const val CHANNEL_ID = "guard"
         const val ACTION_TEST = "com.family.answerlock.TEST"
+        /** 系统闹钟到点的动作：结算时间并弹题/锁屏 */
+        const val ACTION_TICK = "com.family.answerlock.TICK"
 
         /**
          * 兼容字段：旧版的 QuizActivity 引用过它。
@@ -506,8 +615,20 @@ class QuizService : Service() {
         }
 
         fun stop(context: android.content.Context) {
+            val intent = Intent(context, QuizService::class.java).setAction(ACTION_TICK)
+            val pi = if (android.os.Build.VERSION.SDK_INT >= 26)
+                PendingIntent.getForegroundService(
+                    context, 2001, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            else
+                PendingIntent.getService(
+                    context, 2001, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            (context.getSystemService(android.content.Context.ALARM_SERVICE) as AlarmManager).cancel(pi)
             context.getSharedPreferences("guard", android.content.Context.MODE_PRIVATE)
-                .edit().putInt("remaining", 0).putBoolean("locked", false).apply()
+                .edit().putBoolean("guardOn", false).putBoolean("locked", false).apply()
             context.stopService(Intent(context, QuizService::class.java))
         }
     }

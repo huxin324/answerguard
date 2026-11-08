@@ -172,7 +172,16 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:layout_marginTop="8dp"
-            android:text="🔔 测试弹题效果" />
+            android:text="🔔 立即弹一道题（测试效果）" />
+
+        <Button
+            android:id="@+id/test10Btn"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#E6F7EE"
+            android:text="⚡ 10 秒后自动弹题（切到抖音验证）"
+            android:textColor="#0B7A4B" />
 
         <Button
             android:id="@+id/stopBtn"
