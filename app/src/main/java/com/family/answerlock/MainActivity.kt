@@ -101,7 +101,8 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.testBtn).setOnClickListener {
             saveConfig()
-            startActivity(Intent(this, QuizActivity::class.java).putExtra("mode", "quiz"))
+            QuizService.test(this)
+            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭", Toast.LENGTH_SHORT).show()
         }
     }
 

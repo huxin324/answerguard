@@ -23,14 +23,15 @@
             </intent-filter>
         </activity>
 
-        <!-- 全局答题弹窗：透明全屏，盖在任意 App 之上 -->
-        <activity
-            android:name=".QuizActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleInstance"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.AnswerLock.Translucent" />
+        <!--
+            答题界面已改为悬浮窗方案（WindowManager 直接绘制，不启动 Activity），
+            不再需要 QuizActivity：华为/鸿蒙限制「后台启动界面」会导致弹不出来，
+            悬浮窗方案只要「显示在其他应用上层」权限即可，且上划任务列表滑不掉。
+        -->
+
+        <receiver
+            android:name=".RestartReceiver"
+            android:exported="false" />
 
         <service
             android:name=".QuizService"
