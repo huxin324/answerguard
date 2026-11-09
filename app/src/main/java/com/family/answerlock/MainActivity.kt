@@ -383,8 +383,8 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         val remain = GuardCore.remaining(this)
         statusTv.text = if (on) {
-            "v1.8 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.8 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v1.9 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.9 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
         // 倒计时按「时间戳账本」算，进程被冻结也不会错
         val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"

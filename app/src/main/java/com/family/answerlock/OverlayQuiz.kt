@@ -203,21 +203,24 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     /** 上滑手势区域排除：能挡住一部分机型的手势导航（不保证全部，兜底靠自动重弹） */
     private fun blockSystemGestures(v: View) {
         if (Build.VERSION.SDK_INT < 29) return
-        v.post {
-            try {
-                val d = ctx.resources.displayMetrics.density
-                val h = v.height
-                val w = v.width
-                if (h <= 0 || w <= 0) return@post
-                val edge = (200 * d).toInt()
-                v.systemGestureExclusionRects = listOf(
-                    Rect(0, 0, w, minOf(edge, h)),
-                    Rect(0, maxOf(h - edge, 0), w, h),
-                    Rect(0, 0, minOf(edge, w), h),
-                    Rect(maxOf(w - edge, 0), 0, w, h)
-                )
-            } catch (e: Exception) { /* 某些系统不支持，忽略 */ }
-        }
+        v.post(object : Runnable {
+            override fun run() {
+                try {
+                    val d = ctx.resources.displayMetrics.density
+                    val h = v.height
+                    val w = v.width
+                    if (h > 0 && w > 0) {
+                        val edge = (200 * d).toInt()
+                        val rects = ArrayList<Rect>(4)
+                        rects.add(Rect(0, 0, w, minOf(edge, h)))
+                        rects.add(Rect(0, maxOf(h - edge, 0), w, h))
+                        rects.add(Rect(0, 0, minOf(edge, w), h))
+                        rects.add(Rect(maxOf(w - edge, 0), 0, w, h))
+                        v.setSystemGestureExclusionRects(rects)
+                    }
+                } catch (e: Exception) { /* 某些系统不支持，忽略 */ }
+            }
+        })
     }
 
     /** 关闭弹窗：亲子答对 / 家长解锁 / 服务销毁 */
@@ -322,8 +325,9 @@ class OverlayQuiz private constructor(private val ctx: Context) {
                 val txt = if (s >= 60) "${s / 60} 分 ${s % 60} 秒" else "$s 秒"
                 timerTv?.text = "⏳ 剩余作答时间：$txt（超时算答错）"
                 // 每 5 秒把剩余秒数落盘，被划掉重弹时接着倒计时
-                if (s % 5 == 0 && prefs.getInt("qLeftSec", -1) != s) {
-                    prefs.edit().putInt("qLeftSec", s).apply()
+                val secInt = s.toInt()
+                if (secInt % 5 == 0 && prefs.getInt("qLeftSec", -1) != secInt) {
+                    prefs.edit().putInt("qLeftSec", secInt).apply()
                 }
             }
 
