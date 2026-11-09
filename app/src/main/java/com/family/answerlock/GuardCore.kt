@@ -108,7 +108,19 @@ object GuardCore {
     fun tick(c: Context) {
         val p = prefs(c)
         val now = System.currentTimeMillis()
+
+        // 记录「心跳最长中断」：正常应约 1 秒。若出现几十秒的空洞，
+        // 说明后台进程被系统冻结过（这就是不弹题的证据，家长页会直接显示）
+        val prevBeat = lastBeat
+        if (prevBeat > 0L) {
+            val gap = (now - prevBeat) / 1000L
+            if (gap >= 8L) {
+                val prevMax = p.getLong("maxGapSec", 0L)
+                if (gap > prevMax) p.edit().putLong("maxGapSec", gap).apply()
+            }
+        }
         lastBeat = now
+
         if (!p.getBoolean("guardOn", false)) return
 
         if (lastAtWall == 0L) {
@@ -173,11 +185,12 @@ object GuardCore {
         return ((interval * 1000L - (now - last)) / 1000L).toInt().coerceAtLeast(0)
     }
 
-    /** 当前是靠谁在驱动：无障碍（稳）/ 闹钟（可能被冻结） */
-    fun modeText(c: Context): String =
-        if (GuardAccessibilityService.alive || GuardAccessibilityService.isEnabled(c))
-            "无障碍接管 ✅ 离开 App 也能弹"
-        else "闹钟模式 ⚠️ 建议开启无障碍"
+    /** 当前靠什么在保活：静音媒体保活 / 无障碍 / 只有闹钟 */
+    fun modeText(c: Context): String = when {
+        GuardAccessibilityService.alive -> "无障碍 + 静音保活 ✅"
+        QuizService.keepAlive -> "静音保活 ✅ 不会被冻结"
+        else -> "仅闹钟 ⚠️ 容易被冻结"
+    }
 
     /* ================= 内部 ================= */
 

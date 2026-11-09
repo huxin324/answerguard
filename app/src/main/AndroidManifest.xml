@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 前台服务：提高进程优先级 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 前台服务类型 mediaPlayback：让守护进程像音乐 App 一样常驻，不被系统冻结 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 唤醒锁：保持静音播放通道，防止后台被冻结（v1.7 核心） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 悬浮窗：允许在任何 App 上面弹出答题窗口（核心权限） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 电池优化白名单，防止后台服务被系统杀掉 -->
@@ -67,7 +71,8 @@
 
         <service
             android:name=".QuizService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 
 </manifest>

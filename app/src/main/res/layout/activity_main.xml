@@ -204,21 +204,21 @@
         <Button
             android:id="@+id/a11yBtn"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="48dp"
             android:layout_marginTop="8dp"
-            android:backgroundTint="#8B5CF6"
-            android:text="🔑 开启无障碍守护（最关键，必开）"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp" />
+            android:backgroundTint="#F3EEFF"
+            android:text="🔑 无障碍（华为机型开不了，可跳过）"
+            android:textColor="#6D28D9" />
 
         <Button
             android:id="@+id/huaweiBtn"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="52dp"
             android:layout_marginTop="8dp"
             android:backgroundTint="#FDECEC"
-            android:text="📱 华为防杀设置（自启动/后台活动，必点）"
-            android:textColor="#C0392B" />
+            android:text="📱 华为防冻结 3 步设置（必做）"
+            android:textColor="#C0392B"
+            android:textSize="16sp" />
 
         <!-- 状态与统计 -->
         <TextView

@@ -9,21 +9,44 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 
 /**
- * 守护前台服务（保活 + 闹钟兜底）。
+ * 守护前台服务 = 计时主驱动 + 进程保活 + 闹钟兜底。
  *
- * v1.6 起「计时」和「弹窗」都交给 GuardCore / OverlayQuiz：
- * - 主驱动：无障碍服务每秒心跳（不被鸿蒙冻结）→ 离开 App 也能准时弹题
- * - 本服务：常驻前台通知，把进程优先级抬高；同时用 AlarmManager 排闹钟做第二重保险
- *   （万一家长没开无障碍，就只剩这条路，可能被冻结，所以首页会提示去开无障碍）
+ * 三重保险（针对华为鸿蒙的「后台冻结」）：
+ * ① 媒体级保活：用 AudioTrack 循环播放一段全 0 的静音音频。
+ *    系统会把本进程当成「正在播放媒体」的应用（和音乐 App 同级），不会被当作可回收进程冻结。
+ *    音频数据全是 0，完全无声，耗电可忽略。
+ * ② 前台服务 + 每秒心跳：前台通知抬高进程优先级，Handler 每秒 tick 一次结算时间，到点直接弹悬浮窗。
+ * ③ AlarmManager.setAlarmClock 兜底：万一进程还是被压住，系统闹钟会准点唤醒服务（状态栏会显示闹钟图标）。
+ *
+ * 注：华为/鸿蒙禁止侧载安装的 App 开启「无障碍」权限（提示"应用暂不支持获取系统无障碍权限"），
+ * 所以 v1.7 不再依赖无障碍，主动力换成本服务的静音保活 + 心跳。
  */
 class QuizService : Service() {
 
     private lateinit var prefs: SharedPreferences
+    private val h = Handler(Looper.getMainLooper())
+    private var silentTrack: AudioTrack? = null
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            try {
+                GuardCore.tick(this@QuizService)
+            } catch (e: Throwable) {
+                GuardCore.diag(this@QuizService, "心跳异常：${e.javaClass.simpleName}")
+            }
+            h.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -42,9 +65,16 @@ class QuizService : Service() {
             .setContentText("到时间会自动弹题，请勿在设置里关闭本应用")
             .setOngoing(true)
             .build()
-        startForeground(1, n)
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+            startForeground(1, n)
+        }
 
-        // 提前预热语音引擎和音效，弹题时立刻有声音
+        startSilentKeepAlive()          // ① 媒体保活
+        h.removeCallbacks(ticker)
+        h.post(ticker)                  // ② 每秒心跳
+
         OverlayQuiz.get(this).let {
             it.onClosed = { GuardCore.afterOverlayClosed(this) }
             it.warmup()
@@ -58,7 +88,6 @@ class QuizService : Service() {
                 OverlayQuiz.get(this).showQuiz()
             }
             ACTION_TICK -> {
-                // 闹钟到点：结算时间并弹题（无障碍服务没开时这就是唯一驱动）
                 GuardCore.tick(this)
                 scheduleSelf()
             }
@@ -67,7 +96,7 @@ class QuizService : Service() {
                 scheduleSelf()
             }
             else -> {
-                // 兼容旧版调用（无 action）＝家长点「启动守护」
+                // 无 action ＝ 家长点「启动守护」：重置为全新一天
                 GuardCore.bootstrap(this)
                 scheduleSelf()
             }
@@ -75,7 +104,53 @@ class QuizService : Service() {
         return START_STICKY
     }
 
-    /** 按当前配置排下一次闹钟 */
+    /* ================= ① 媒体级静音保活 ================= */
+
+    private fun startSilentKeepAlive() {
+        if (silentTrack != null) return
+        try {
+            val sampleRate = 8000
+            val samples = ShortArray(sampleRate)          // 1 秒全 0（完全无声）
+            val t = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(samples.size * 2)
+                .build()
+            t.write(samples, 0, samples.size)
+            t.setLoopPoints(0, samples.size, -1)          // 无限循环
+            t.setVolume(0.002f)                            // 数据本身是 0，实际无声
+            t.play()
+            silentTrack = t
+            keepAlive = true
+        } catch (e: Exception) {
+            keepAlive = false
+            GuardCore.diag(this, "媒体保活启动失败：${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun stopSilentKeepAlive() {
+        try {
+            silentTrack?.stop()
+            silentTrack?.release()
+        } catch (e: Exception) { /* ignore */ }
+        silentTrack = null
+        keepAlive = false
+    }
+
+    /* ================= ③ 闹钟兜底 ================= */
+
     private fun scheduleSelf() {
         if (!prefs.getBoolean("guardOn", false)) return
         val interval = prefs.getInt("intervalSec", 60)
@@ -84,15 +159,33 @@ class QuizService : Service() {
     }
 
     private fun scheduleNext(delaySec: Int) {
-        val at = SystemClock.elapsedRealtime() + delaySec * 1000L
         val pi = tickPendingIntent()
         val am = getSystemService(ALARM_SERVICE) as AlarmManager
+        val wall = System.currentTimeMillis() + delaySec * 1000L
+
+        // ① 闹钟类闹钟：系统几乎必定投递（状态栏会显示闹钟图标，这是「守护在跑」的凭证）
         try {
-            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            am.setAlarmClock(AlarmManager.AlarmClockInfo(wall, null), pi)
+            alarmMode = "闹钟"
+            return
+        } catch (e: Exception) { /* 退到精确闹钟 */ }
+
+        try {
+            am.setExactAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + delaySec * 1000L, pi
+            )
+            alarmMode = "精确闹钟"
         } catch (e: Exception) {
             try {
-                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-            } catch (e2: Exception) { /* 闹钟排不上也不致命：无障碍心跳仍在工作 */ }
+                am.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + delaySec * 1000L, pi
+                )
+                alarmMode = "宽松闹钟"
+            } catch (e2: Exception) {
+                alarmMode = "闹钟失败"
+            }
         }
     }
 
@@ -118,18 +211,19 @@ class QuizService : Service() {
                     this, 0, Intent(this, RestartReceiver::class.java),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
-                (getSystemService(ALARM_SERVICE) as AlarmManager).setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + 1500, pi
+                (getSystemService(ALARM_SERVICE) as AlarmManager).setAlarmClock(
+                    AlarmManager.AlarmClockInfo(System.currentTimeMillis() + 1500, null), pi
                 )
-            } catch (e: Exception) { /* 华为可能拒绝，无障碍守护仍在 */ }
+            } catch (e: Exception) { /* ignore */ }
         }
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        // 系统杀进程时保留 guardOn，守护状态不丢；只有家长点「停止守护」才会被清掉
+        h.removeCallbacks(ticker)
+        stopSilentKeepAlive()
         running = false
+        // 不清理 guardOn：系统杀进程后闹钟到点会重新唤醒服务，守护自动恢复
         super.onDestroy()
     }
 
@@ -142,26 +236,30 @@ class QuizService : Service() {
         const val ACTION_START = "com.family.answerlock.START"
         const val ACTION_RESUME = "com.family.answerlock.RESUME"
 
-        /** 兼容旧代码的字段（旧版 QuizActivity 引用过） */
+        /** 兼容旧代码的字段 */
         @Volatile var quizOpen = false
 
         /** 服务是否活着（家长页自检用） */
         @Volatile var running = false
 
-        /** 家长点「启动守护」*/
+        /** 静音媒体保活是否在跑 */
+        @Volatile var keepAlive = false
+
+        /** 当前用的是哪种闹钟（诊断显示） */
+        @Volatile var alarmMode = ""
+
         fun start(context: Context) {
             context.startForegroundService(
                 Intent(context, QuizService::class.java).setAction(ACTION_START)
             )
         }
 
-        /** 守护恢复（不重置时间）：开机 / 被系统杀掉后重新拉起时用 */
         fun resume(context: Context) {
             try {
                 context.startForegroundService(
                     Intent(context, QuizService::class.java).setAction(ACTION_RESUME)
                 )
-            } catch (e: Exception) { /* 后台受限时可能抛异常，忽略 */ }
+            } catch (e: Exception) { /* 后台受限时可能抛异常 */ }
         }
 
         fun test(context: Context) {
@@ -182,7 +280,9 @@ class QuizService : Service() {
                     context, 2001, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-            (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pi)
+            try {
+                (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pi)
+            } catch (e: Exception) { /* ignore */ }
             GuardCore.prefs(context).edit()
                 .putBoolean("guardOn", false).putBoolean("locked", false).apply()
             OverlayQuiz.get(context).close()

@@ -116,15 +116,6 @@ class MainActivity : AppCompatActivity() {
                 )
                 return@setOnClickListener
             }
-            if (!GuardAccessibilityService.isEnabled(this)) {
-                Toast.makeText(
-                    this,
-                    "先开「无障碍」再测：不开的话切到抖音会被系统冻结，测不出真实效果",
-                    Toast.LENGTH_LONG
-                ).show()
-                GuardAccessibilityService.openSettings(this)
-                return@setOnClickListener
-            }
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
             QuizService.start(this)
@@ -214,19 +205,15 @@ class MainActivity : AppCompatActivity() {
         QuizService.start(this)
         updateStatus()
 
-        // 3. 无障碍。华为/鸿蒙会冻结后台 App，冻结期间闹钟不投递 —— 这是「离开 App 就不弹」的根因。
-        //    只有开启无障碍，守护才不会被冻结。所以这一项没开就先带家长去开。
-        if (!GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(
-                this,
-                "还差最后一步：找到「答题守护」打开无障碍开关。不开这一项，离开 App 就不会弹题。",
-                Toast.LENGTH_LONG
-            ).show()
-            GuardAccessibilityService.openSettings(this)
-            return
-        }
+        // 3. 无障碍只是加分项：华为/鸿蒙禁止「侧载安装」的 App 开启无障碍
+        //    （会提示"应用暂不支持获取系统无障碍权限"），所以不再当必要条件。
+        //    主保活手段已换成服务里的「静音媒体保活 + 每秒心跳」，不依赖无障碍。
+        Toast.makeText(
+            this,
+            "✅ 守护已启动：静音媒体保活已开启，切到别的 App 也会准时弹题",
+            Toast.LENGTH_LONG
+        ).show()
 
-        Toast.makeText(this, "✅ 守护已启动，可以放心把手机交给孩子了", Toast.LENGTH_LONG).show()
         // 4. 省电豁免（第二重保险）
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
@@ -244,18 +231,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 一键跳到系统无障碍设置页（最关键的开关：开了它守护才不会被冻结） */
+    /** 无障碍（华为对侧载 App 会拦截，仅作可选加分项） */
     private fun openA11y() {
         if (GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(this, "✅ 无障碍守护已开启，离开 App 也能准时弹题", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "✅ 无障碍已开启，会额外多一层保障", Toast.LENGTH_LONG).show()
             return
         }
         Toast.makeText(
             this,
-            "在列表里找到「答题守护」→ 打开开关 → 弹窗点「允许」。开好后回来自检会变成 ✅",
+            "华为不允许侧载应用开无障碍（会提示「暂不支持」）。跳过没关系——已用静音保活替代，直接点「启动守护」即可。",
             Toast.LENGTH_LONG
         ).show()
-        GuardAccessibilityService.openSettings(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("关于「无障碍」")
+            .setMessage(
+                "华为/鸿蒙出于隐私策略，禁止「非华为应用市场安装」的 App 开启无障碍服务，" +
+                    "所以系统会提示「应用暂不支持获取系统无障碍权限」，这不是 App 的问题，也不是你没点对。\n\n" +
+                    "v1.7 已经不再依赖无障碍：改用「静音媒体保活 + 每秒心跳 + 系统闹钟」三重机制，" +
+                    "让守护进程像音乐 App 一样常驻，不会被系统冻结。\n\n" +
+                    "所以这一步可以跳过，直接点「▶️ 启动守护」。"
+            )
+            .setPositiveButton("知道了", null)
+            .show()
     }
 
     /**
@@ -263,6 +260,25 @@ class MainActivity : AppCompatActivity() {
      * 这是华为手机防止 App 后台被冻结、闹钟被压住的官方开关。
      */
     private fun openHuaweiStartup() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("📱 华为防冻结：这 3 步一定要做")
+            .setMessage(
+                "第 1 步：设置 → 电池 → 应用耗电管理（或「更多电池设置」）→ 答题守护 → " +
+                    "选「允许后台活动 / 不受限制」\n\n" +
+                    "第 2 步：设置 → 应用和服务 → 应用启动管理 → 答题守护 → " +
+                    "关掉「自动管理」，弹出的「自启动 / 关联启动 / 后台活动」三项全部打开\n\n" +
+                    "第 3 步：打开最近任务（从屏幕底部上滑并停住），找到「答题守护」卡片，" +
+                    "按住往下拉，出现小锁 🔒 就说明锁定了，系统清理不掉它\n\n" +
+                    "做完这 3 步，再点「▶️ 启动守护」，然后切到抖音等它弹题。"
+            )
+            .setPositiveButton("去启动管理") { _, _ -> jumpHuaweiStartup() }
+            .setNeutralButton("去应用信息页") { _, _ -> jumpAppDetail() }
+            .setNegativeButton("知道了", null)
+            .show()
+    }
+
+    /** 尝试直达华为「应用启动管理」页面 */
+    private fun jumpHuaweiStartup() {
         val candidates = listOf(
             android.content.ComponentName(
                 "com.huawei.systemmanager",
@@ -282,20 +298,25 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent().setComponent(cn))
                 Toast.makeText(
                     this,
-                    "找到「答题守护」→ 关掉「自动管理」→ 三项全开，然后回来点「启动守护」",
+                    "找到「答题守护」→ 关掉「自动管理」→ 三项全开",
                     Toast.LENGTH_LONG
                 ).show()
                 return
             } catch (e: Exception) { /* 试下一个入口 */ }
         }
-        // 都打不开 → 退回应用详情页，手动找「电池启动管理」
+        jumpAppDetail()
+    }
+
+    private fun jumpAppDetail() {
         try {
             startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
             )
-            Toast.makeText(this, "在应用信息里找「电池/启动管理」，把自启动和后台活动打开", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this, "在应用信息里找「耗电管理」，选「允许后台活动」", Toast.LENGTH_LONG
+            ).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "请手动到 设置→应用和服务→应用启动管理→答题守护 打开三项", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请手动到 设置→应用→应用启动管理→答题守护 打开三项", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -346,20 +367,14 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
-        // ④ 无障碍（最关键：不用它，后台进程会被鸿蒙冻结，闹钟不投递 → 离开 App 就不弹）
-        if (!GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(
-                this,
-                "④ 找到「答题守护」打开无障碍开关（最关键的一项）",
-                Toast.LENGTH_LONG
-            ).show()
-            GuardAccessibilityService.openSettings(this)
-            return
+        // ④ 无障碍：华为禁止侧载应用开启，仅当已经开了才提示，不作为必需项
+        if (GuardAccessibilityService.isEnabled(this)) {
+            Toast.makeText(this, "④ 无障碍已开（额外保障）", Toast.LENGTH_SHORT).show()
         }
         updateStatus()
         Toast.makeText(
             this,
-            "✅ 权限都齐了：点「▶️ 启动守护」，然后切到抖音等它弹题",
+            "✅ 权限齐了：点「▶️ 启动守护」，再按「📱 华为防冻结」把 3 步做完，然后切到抖音等弹题",
             Toast.LENGTH_LONG
         ).show()
     }
@@ -368,8 +383,8 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         val remain = GuardCore.remaining(this)
         statusTv.text = if (on) {
-            "v1.6 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.6 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v1.7 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v1.7 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
         // 倒计时按「时间戳账本」算，进程被冻结也不会错
         val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"
@@ -383,13 +398,14 @@ class MainActivity : AppCompatActivity() {
         else "累计答题 $total · 答对 $ok · 答错 $no · 正确率 ${ok * 100 / total}%"
     }
 
-    /** 心跳自检：直接告诉家长「守护进程有没有被系统冻结」 */
+    /** 保活自检：告诉家长「进程在后台有没有被冻结过」 */
     private fun beatText(): String {
-        val b = GuardCore.lastBeat
-        if (b == 0L) return "心跳 —（还没跳，点「启动守护」）"
-        val ago = ((System.currentTimeMillis() - b) / 1000L).toInt()
-        return if (ago <= 3) "心跳 ✅ ${ago} 秒前跳动，守护进程活着"
-        else "心跳 ⚠️ 已 ${ago} 秒没跳：进程被系统冻结 → 开无障碍 + 电池不限制"
+        val srv = if (QuizService.running) "✅" else "❌"
+        val keep = if (QuizService.keepAlive) "✅" else "❌"
+        val maxGap = prefs.getLong("maxGapSec", 0L)
+        val gap = if (maxGap < 8) "后台连续运行 ✅"
+        else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结」3 步）"
+        return "服务 $srv 静音保活 $keep · $gap"
     }
 
     /** 权限自检：哪一项是 ❌，就去系统里把那一项打开 */
@@ -401,8 +417,6 @@ class MainActivity : AppCompatActivity() {
         ) "✅" else "❌"
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
-        val a11y = if (GuardAccessibilityService.isEnabled(this)) "✅" else "❌"
-        val alive = if (QuizService.running) "✅" else "❌"
-        return "自检 弹窗 $overlay 通知 $notif 省电 $battery 无障碍 $a11y 服务 $alive"
+        return "自检 弹窗 $overlay 通知 $notif 省电 $battery"
     }
 }
