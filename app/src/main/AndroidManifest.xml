@@ -24,8 +24,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AnswerLock">
 
+        <!--
+            excludeFromRecents：让「答题守护」不显示在最近任务里。
+            孩子上滑看不到这张卡片，就没法靠划卡片把守护划掉。
+            家长仍可从桌面图标正常打开。
+        -->
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -69,10 +75,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- stopWithTask=false：任务被划掉也不停止服务，配合 onTaskRemoved 立刻重弹 -->
         <service
             android:name=".QuizService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false" />
     </application>
 
 </manifest>

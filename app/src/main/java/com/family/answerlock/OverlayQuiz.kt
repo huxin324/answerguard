@@ -2,8 +2,10 @@ package com.family.answerlock
 
 import android.content.Context
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.media.AudioAttributes
 import android.media.SoundPool
+import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Handler
@@ -37,6 +39,9 @@ import java.util.Locale
 class OverlayQuiz private constructor(private val ctx: Context) {
 
     companion object {
+        /** 选项落盘用的分隔符（题干里不会出现） */
+        private const val SEP_OPT = "\u0001"
+
         @Volatile private var inst: OverlayQuiz? = null
 
         /** 是否正在显示答题/锁屏窗（计时会暂停） */
@@ -79,6 +84,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     /* ---------- 答题状态 ---------- */
     private var pending = 0
     private var cur: QuestionBank.Q? = null
+    /** 下一次 show 时是否接着上次那道题（被划掉/被杀后重弹用） */
+    private var resumeNext = false
     private var answerTimer: CountDownTimer? = null
     private var lastExplain = ""
     private var speakRunnable: Runnable? = null
@@ -101,6 +108,18 @@ class OverlayQuiz private constructor(private val ctx: Context) {
 
     fun showQuiz() = show("quiz")
     fun showLock() = show("lock")
+
+    /**
+     * 没答完的题被划掉 / 进程被杀之后重新弹出来，并且沿用原来那道题（划掉换不来新题）。
+     */
+    fun resumePending(): Boolean {
+        if (!prefs.getBoolean("overlayOpen", false)) return false
+        if (isShowing) return true
+        resumeNext = true
+        val mode = prefs.getString("overlayMode", "quiz") ?: "quiz"
+        show(if (mode == "lock") "lock" else "quiz")
+        return true
+    }
 
     private fun show(mode: String) {
         if (isShowing) {
@@ -130,9 +149,11 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         replayBtn = v.findViewById(R.id.replayBtn)
         pwdEt = v.findViewById(R.id.lockPwd)
 
-        // 吃掉返回键
+        // 吃掉返回键 + 吃掉所有触摸（不让点击漏到底下的 App）
         v.isFocusable = true
         v.isFocusableInTouchMode = true
+        v.isClickable = true
+        v.setOnClickListener { }
         v.setOnKeyListener { _, keyCode, _ -> keyCode == KeyEvent.KEYCODE_BACK }
 
         replayBtn?.setOnClickListener {
@@ -142,23 +163,61 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         }
 
         try {
-            wm.addView(
-                v, WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT
-                ).apply { gravity = Gravity.CENTER }
-            )
+            val lp = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.CENTER }
+            // 铺满刘海区域，避免顶部留出缺口让孩子点到状态栏
+            if (Build.VERSION.SDK_INT >= 28) {
+                lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            wm.addView(v, lp)
         } catch (e: Exception) {
             root = null
             GuardCore.diag(ctx, "失败：${e.javaClass.simpleName} ${e.message}")
             return
         }
 
+        // 尽量屏蔽「上滑回桌面/最近任务」手势（系统只允许排除边缘 200dp 内的区域，尽力而为）
+        blockSystemGestures(v)
+
         isShowing = true
-        if (mode == "lock") showLockUi() else nextQuestion()
+        // 落盘「有一题没答完」：进程被杀 / 窗口被系统移除后，服务会立刻把它重新弹出来
+        prefs.edit()
+            .putBoolean("overlayOpen", true)
+            .putString("overlayMode", mode)
+            .apply()
+
+        if (mode == "lock") showLockUi()
+        else if (resumeNext) {
+            resumeNext = false
+            restoreQuestion()
+            GuardCore.diag(ctx, "答题窗被划掉 → 已重新弹出（必须答对才能离开）")
+        } else nextQuestion()
+    }
+
+    /** 上滑手势区域排除：能挡住一部分机型的手势导航（不保证全部，兜底靠自动重弹） */
+    private fun blockSystemGestures(v: View) {
+        if (Build.VERSION.SDK_INT < 29) return
+        v.post {
+            try {
+                val d = ctx.resources.displayMetrics.density
+                val h = v.height
+                val w = v.width
+                if (h <= 0 || w <= 0) return@post
+                val edge = (200 * d).toInt()
+                v.systemGestureExclusionRects = listOf(
+                    Rect(0, 0, w, minOf(edge, h)),
+                    Rect(0, maxOf(h - edge, 0), w, h),
+                    Rect(0, 0, minOf(edge, w), h),
+                    Rect(maxOf(w - edge, 0), 0, w, h)
+                )
+            } catch (e: Exception) { /* 某些系统不支持，忽略 */ }
+        }
     }
 
     /** 关闭弹窗：亲子答对 / 家长解锁 / 服务销毁 */
@@ -180,6 +239,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         }
         root = null
         isShowing = false
+        // 正常关闭 = 这一题结束了，清除「没答完」标记（否则 watchdog 会把它又弹出来）
+        prefs.edit().putBoolean("overlayOpen", false).putString("overlayMode", "").apply()
         if (was) onClosed?.invoke()
     }
 
@@ -192,9 +253,46 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         val subjects = prefs.getString("subjects", "math")!!
             .split(",").filter { it.isNotBlank() }
 
-        cur = QuestionBank.make(grade, subjects)
-        val q = cur!!
+        val q = QuestionBank.make(grade, subjects)
+        cur = q
 
+        // 落盘当前这道题：孩子上滑杀掉进程后，重新弹出来的还是同一道题（换不来一道新题），
+        // 剩余倒计时也接着走，删掉重来毫无收益。
+        prefs.edit()
+            .putString("qSubject", q.subject)
+            .putString("qText", q.text)
+            .putString("qAnswer", q.answer)
+            .putString("qExplain", q.explain)
+            .putString("qOptions", q.options.joinToString(SEP_OPT))
+            .putInt("qLeftSec", prefs.getInt("quizTimeSec", 60))
+            .apply()
+
+        render(q, prefs.getInt("quizTimeSec", 60))
+    }
+
+    /** 重新弹窗时恢复上次没答完的那道题（含剩余时间） */
+    private fun restoreQuestion() {
+        if (root == null) return
+        val text = prefs.getString("qText", null)
+        val opts = prefs.getString("qOptions", null)
+        if (text.isNullOrBlank() || opts.isNullOrBlank()) {
+            nextQuestion()
+            return
+        }
+        val q = QuestionBank.Q(
+            subject = prefs.getString("qSubject", "数学") ?: "数学",
+            text = text,
+            answer = prefs.getString("qAnswer", "") ?: "",
+            explain = prefs.getString("qExplain", "") ?: "",
+            options = opts.split(SEP_OPT).filter { it.isNotBlank() }
+        )
+        cur = q
+        val left = prefs.getInt("qLeftSec", prefs.getInt("quizTimeSec", 60)).coerceAtLeast(5)
+        render(q, left)
+    }
+
+    /** 画一道题 + 起倒计时。startSec = 这题还剩多少秒可答 */
+    private fun render(q: QuestionBank.Q, startSec: Int) {
         subjectTv?.text = "📘 ${q.subject} · 答对才能继续玩"
         if (pending > 0) {
             penaltyTv?.visibility = View.VISIBLE
@@ -218,12 +316,15 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         }
 
         answerTimer?.cancel()
-        val total = prefs.getInt("quizTimeSec", 60) * 1000L
-        answerTimer = object : CountDownTimer(total, 500) {
+        answerTimer = object : CountDownTimer(startSec * 1000L, 500) {
             override fun onTick(ms: Long) {
                 val s = ms / 1000 + 1
                 val txt = if (s >= 60) "${s / 60} 分 ${s % 60} 秒" else "$s 秒"
                 timerTv?.text = "⏳ 剩余作答时间：$txt（超时算答错）"
+                // 每 5 秒把剩余秒数落盘，被划掉重弹时接着倒计时
+                if (s % 5 == 0 && prefs.getInt("qLeftSec", -1) != s) {
+                    prefs.edit().putInt("qLeftSec", s).apply()
+                }
             }
 
             override fun onFinish() {

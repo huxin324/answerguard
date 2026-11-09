@@ -79,6 +79,11 @@ class QuizService : Service() {
             it.onClosed = { GuardCore.afterOverlayClosed(this) }
             it.warmup()
         }
+
+        // 进程刚被重建（孩子划掉任务 / 系统杀进程后重启）：有一题没答完就立刻弹回来
+        if (prefs.getBoolean("overlayOpen", false)) {
+            h.postDelayed({ OverlayQuiz.get(this@QuizService).resumePending() }, 600)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -203,16 +208,23 @@ class QuizService : Service() {
             )
     }
 
-    /** 孩子上划划掉任务后，1.5 秒后自动把服务拉起来 */
+    /** 孩子上划划掉任务后：立刻重启服务 + 把没答完的题弹回来（划掉 ≠ 逃脱） */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (prefs.getBoolean("guardOn", false)) {
+            // ① 立刻拉起（本进程还活着时这一步就能成功，衔接最快）
+            try {
+                startForegroundService(
+                    Intent(this, QuizService::class.java).setAction(ACTION_RESUME)
+                )
+            } catch (e: Exception) { /* 后台受限，靠下面的闹钟 */ }
+            // ② 闹钟兜底：万一进程随后被系统杀，1 秒后也要把服务唤醒
             try {
                 val pi = PendingIntent.getBroadcast(
                     this, 0, Intent(this, RestartReceiver::class.java),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
                 (getSystemService(ALARM_SERVICE) as AlarmManager).setAlarmClock(
-                    AlarmManager.AlarmClockInfo(System.currentTimeMillis() + 1500, null), pi
+                    AlarmManager.AlarmClockInfo(System.currentTimeMillis() + 1200, null), pi
                 )
             } catch (e: Exception) { /* ignore */ }
         }

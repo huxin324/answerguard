@@ -37,6 +37,9 @@ object GuardCore {
     @Volatile var lastBeat = 0L
         private set
 
+    /** 上次「重新弹题」的秒级时间，避免每秒都重试 */
+    @Volatile private var lastReshowSec = 0L
+
     fun prefs(c: Context): SharedPreferences = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /* ================= 日志 / 通知 ================= */
@@ -122,6 +125,16 @@ object GuardCore {
         lastBeat = now
 
         if (!p.getBoolean("guardOn", false)) return
+
+        // 自愈：有题没答完，但窗口已经不在了（孩子上滑划掉任务 / 系统移除窗口 / 进程被重建）
+        // → 每 2 秒重新弹一次，删进程 ≠ 逃脱，必须答对才能离开。
+        if (p.getBoolean("overlayOpen", false) && !OverlayQuiz.isShowing) {
+            val t = now / 1000L
+            if (t - lastReshowSec >= 2L) {
+                lastReshowSec = t
+                OverlayQuiz.get(c).resumePending()
+            }
+        }
 
         if (lastAtWall == 0L) {
             var last = p.getLong("lastAtWall", now)
