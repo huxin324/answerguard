@@ -29,22 +29,28 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 /**
- * 家长页（v2.6）：
- * 打开 App → 年级 / 弹题间隔 / 出题科目 / 语音 / 答题倒计时 / 加题 / 今日上限 / 密码
- * 全部直接可见可点，选好点一次「② 开始守护」即可。
+ * 家长页（v3.0）：只留一个主按钮 + 一张使用须知。
  *
- * ① 防清理保护（只有一步，点一次系统弹窗里按「激活」，之后永久生效）：
- *   设备管理器 = 挡住「设置里的强行停止」和「未取消激活就卸载」。
- *   真正的防清理（上滑卡片 / 一键清理）由 QuizService 自己完成：它会进入系统的
- *   「媒体播放」状态，被归为音乐类应用，厂商清理会跳过正在播放的东西。
- *   v2.5 曾要求家长去最近任务里下拉锁卡片，那是 SystemUI 私有功能、App 无 API 可调，
- *   属于把系统限制转嫁给用户，v2.6 已删除。
+ * 页面顺序：年级/间隔 → 出题设置 → 【大按钮】→ 使用须知（红色，教锁后台卡片）→ 状态 → 诊断
  *
- * ② 开始守护：权限（悬浮窗/通知/省电/闹钟/华为启动管理/后台弹窗）不需要家长自己找，
- *   点一次后自动逐个跳转，每授一项回来就自动继续下一项。
+ * 主按钮四态（一个按钮走完）：
+ *   灰「▶ 开始守护」← 缺悬浮窗权限时点它自动跳权限页
+ *   蓝「▶ 开始守护」← 就绪，点一下开始
+ *   绿「🟢 守护中 · 点此停止」← 运行中
+ *   红「■ 确认停止守护」← 连点两下才停，防误触
+ *   停完短暂显示灰「已停止」，1.6 秒后回蓝。
  *
- * 守护运行时保留最近任务卡片，并用家长密码把设置页整体锁住，
- * 孩子点开卡片只能看到「守护运行中 + 输密码」那一屏。
+ * 防清理的真实分工（v3.0 定案）：
+ *   · 防上划/一键清理 = 最近任务卡片「下拉上锁」（唯一实测有效；App 无 API 可代设，
+ *     所以第一次启动后自动弹一次 4 步图文，点「我锁好了」永久记住）。
+ *   · 防卸载/防设置里强行停止 = 设备管理器，降级成使用须知里的一行可选开关，不再挡启动。
+ *   · 后台不被冻结 = 媒体播放态 + 隐形 1px 窗 + 省电豁免（启动链里自动要）。
+ *
+ * 启动链（悬浮窗 → 通知 → 省电 → 闹钟 → 华为启动管理 → 后台弹窗）全自动跳转，
+ * 家长每授一项回来自动继续，不需要自己找设置项。
+ *
+ * 守护运行时用家长密码把设置页整体锁住：孩子从桌面图标点进来，只能看到
+ * 「守护运行中 + 输密码」那一屏。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -65,10 +71,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var diagBox: View
     private lateinit var hintCard: View
     private lateinit var hintTv: TextView
-    private lateinit var adminBtn: Button
-    private lateinit var adminCard: View
-    private lateinit var adminStateTv: TextView
-    private lateinit var adminDescTv: TextView
+    private lateinit var adminLine: TextView
+    private lateinit var noticeCard: View
     private lateinit var startBtn: Button
     private lateinit var startHintTv: TextView
     private lateinit var lockLayer: View
@@ -76,8 +80,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var unlockBtn: Button
     private lateinit var lockErrTv: TextView
 
-    /** 「① 防清理保护」两步的状态缓存：只在变化时才重刷配色，避免每秒重建 drawable */
-    private var lastAdminKey: String? = null
+    /** 主按钮状态的缓存 key：只在状态真的变了才重刷配色，避免每秒重建 drawable */
+    private var lastStartKey: String? = null
+
+    /** 守护中点了第一下「停止」：等第二下确认（4 秒内不点自动取消） */
+    private var stopArmed = false
+    private var stopArmUntil = 0L
+
+    /** 刚停止的 1.6 秒里按钮显示灰色「已停止」，之后回到蓝色 */
+    private var justStopped = false
 
     /** 本次进程内是否已用家长密码解锁设置页（守护运行时页面默认锁住） */
     private var unlocked = false
@@ -123,10 +134,8 @@ class MainActivity : AppCompatActivity() {
         diagBox = findViewById(R.id.diagBox)
         hintCard = findViewById(R.id.hintCard)
         hintTv = findViewById(R.id.hintTv)
-        adminBtn = findViewById(R.id.adminBtn)
-        adminCard = findViewById(R.id.adminCard)
-        adminStateTv = findViewById(R.id.adminStateTv)
-        adminDescTv = findViewById(R.id.adminDescTv)
+        adminLine = findViewById(R.id.adminLine)
+        noticeCard = findViewById(R.id.noticeCard)
         startBtn = findViewById(R.id.startBtn)
         startHintTv = findViewById(R.id.startHintTv)
         lockLayer = findViewById(R.id.lockLayer)
@@ -163,25 +172,8 @@ class MainActivity : AppCompatActivity() {
         chkChinese.isChecked = subs.contains("chinese")
         chkEnglish.isChecked = subs.contains("english")
 
-        // 「开始守护」：只需完成第 ① 步（一次点击），剩下全自动
-        startBtn.setOnClickListener {
-            if (!isAdminActive()) {
-                flashAdminCard()
-                // 直接帮家长把激活页打开，激活完回来自动继续启动，不用再点第二次
-                pendingStart = true
-                saveConfig()
-                Toast.makeText(
-                    this,
-                    "第 ① 步还没开启，正在为你打开激活页：点「激活」就好，回来会自动开始守护",
-                    Toast.LENGTH_LONG
-                ).show()
-                uiHandler.postDelayed({ activateAdmin() }, 500)
-                return@setOnClickListener
-            }
-            saveConfig()
-            pendingStart = true
-            runStartChain()
-        }
+        // 唯一主按钮（v3.0）：蓝＝开始 → 点一下变绿（守护中）→ 再点变红（确认停止）→ 点后变灰
+        startBtn.setOnClickListener { onMainButton() }
 
         // 守护运行时设置页是锁着的，家长在这里输密码解锁
         unlockBtn.setOnClickListener {
@@ -197,22 +189,13 @@ class MainActivity : AppCompatActivity() {
                 unlockEt.setText("")
             }
         }
-        findViewById<Button>(R.id.stopBtn).setOnClickListener {
-            pendingStart = false
-            QuizService.stop(this)
-            updateAll()
-            Toast.makeText(this, "已停止守护", Toast.LENGTH_SHORT).show()
-        }
-        findViewById<Button>(R.id.testBtn).setOnClickListener {
-            saveConfig()
-            QuizService.test(this)
-            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（不影响计时）", Toast.LENGTH_SHORT).show()
+        // 使用须知卡：点卡片重看锁卡片图文；点底部那行切换「防卸载保护」（设备管理器）
+        noticeCard.setOnClickListener { showTaskLockGuide(null) }
+        adminLine.setOnClickListener {
+            if (isAdminActive()) deactivateAdmin() else activateAdmin()
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
         findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
-        adminBtn.setOnClickListener {
-            if (isAdminActive()) deactivateAdmin() else activateAdmin()
-        }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
@@ -231,11 +214,33 @@ class MainActivity : AppCompatActivity() {
         if (prefs.getBoolean("guardOn", false) && !QuizService.running) {
             QuizService.resume(this)
         }
+        // 上次守护是被强行结束的？先把账算清（扣时间 + 追加题），再显示状态
+        checkGuardGap()
         // 一键启动链：授权回来后自动继续下一项
         runStartChain()
         updateAll()
         refreshLockLayer()
         uiHandler.post(refresher)
+    }
+
+    /**
+     * 守护中断检测：进程被 force-stop 后没有任何办法自己活过来，
+     * 但"被杀"这件事本身要留账 —— 下次打开 App 时把中断时长扣掉并追加惩罚题。
+     * 阈值 3 分钟：短时间的系统抖动、息屏、授权跳转都不会误判。
+     */
+    private fun checkGuardGap() {
+        if (!prefs.getBoolean("guardOn", false)) return
+        val last = prefs.getLong("lastBeatWall", 0L)
+        if (last <= 0L) return
+        val gapMin = (System.currentTimeMillis() - last) / 60000L
+        if (gapMin < 3L) return
+        GuardCore.onGapKilled(this, gapMin)
+        lastStartKey = null
+        Toast.makeText(
+            this,
+            "⚠️ 守护刚才被结束了 $gapMin 分钟：已扣除这段时间，并追加惩罚题",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     override fun onPause() {
@@ -295,8 +300,6 @@ class MainActivity : AppCompatActivity() {
      */
     private fun runStartChain() {
         if (!pendingStart) return
-        // 第 ① 步没完成就先等着：家长从激活页返回后 onResume 会再调一次，自动接着往下走
-        if (!isAdminActive()) return
 
         // ① 悬浮窗：核心权限，没有它弹不了题
         if (!Settings.canDrawOverlays(this)) {
@@ -388,19 +391,32 @@ class MainActivity : AppCompatActivity() {
         // 权限齐了 → 启动守护
         pendingStart = false
         QuizService.start(this)
+        // 服务是异步启动的，先落一个标记，让按钮「立刻」变绿（服务里 bootstrap 会再写一次）
+        prefs.edit().putBoolean("guardOn", true).apply()
+        lastStartKey = null
         updateAll()
+        val firstStart = !prefs.getBoolean("taskLocked", false)
         Toast.makeText(
             this,
-            "✅ 已启动！守护会以「正在播放」的身份常驻，一键清理不会清掉它。切到孩子的 App 等弹题即可",
+            if (firstStart) "✅ 已启动！马上教你花 10 秒锁住后台卡片（防上划，只需这一次）"
+            else "✅ 已启动！切到孩子的 App 等弹题即可",
             Toast.LENGTH_LONG
         ).show()
-        uiHandler.postDelayed({ leaveToBackground() }, 1500)
+        uiHandler.postDelayed({
+            if (firstStart) {
+                // 第一次：自动弹出上锁引导，确认后自动退到后台
+                showTaskLockGuide { leaveToBackground() }
+            } else {
+                leaveToBackground()
+            }
+        }, 1800)
     }
 
     /**
-     * 退到后台，**保留最近任务卡片**。
-     * v2.5 之前用 finishAndRemoveTask 把卡片删掉，结果华为一键清理没有任何顾虑，
-     * 直接 force-stop；现在卡片留着，本进程又是「正在播放媒体」状态，清理时会被跳过。
+     * 退到后台但**保留最近任务卡片**（v2.8 恢复，推翻 v2.7）。
+     * 实测：华为最近任务里把卡片「下拉上锁」后，上划/一键清理都杀不掉它 ——
+     * 锁标记虽然不能由 App 直接设置（华为桌面私有功能），但可以引导家长一次完成。
+     * 孩子点开卡片也没用：设置页被家长密码锁层挡住，只能看到「守护运行中 + 输密码」。
      */
     private fun leaveToBackground() {
         unlocked = false
@@ -408,6 +424,39 @@ class MainActivity : AppCompatActivity() {
         try {
             moveTaskToBack(true)
         } catch (e: Throwable) { /* 个别 ROM 不支持就留在前台，锁层已经挡住了 */ }
+    }
+
+    /**
+     * 给最近任务卡片「下拉上锁」的图文引导。
+     * 这个 🔒 是华为桌面（SystemUI）的私有功能，App 没有任何公开 API 可以替用户打上；
+     * 无障碍代点也走不通（华为禁止侧载 App 获取无障碍权限）。
+     * 所以把流程压缩到极限：只在第一次启动守护后自动弹一次，4 步图文，点「我锁好了」
+     * 记入 prefs.taskLocked，之后永远不再打扰。
+     */
+    private fun showTaskLockGuide(onDone: (() -> Unit)?) {
+        AlertDialog.Builder(this)
+            .setTitle("🔒 锁住后台卡片（防上划，只需一次）")
+            .setMessage(
+                "开启守护后，请按下面 4 步给「答题守护」的卡片上锁：\n\n" +
+                    "1️⃣ 从屏幕底部上滑并停顿，进入「最近任务」\n" +
+                    "2️⃣ 找到「答题守护」的卡片\n" +
+                    "3️⃣ 按住卡片往下拉（或长按卡片）\n" +
+                    "4️⃣ 点出现的 🔒 锁图标，卡片右上角出现小锁 = 成功\n\n" +
+                    "上锁之后：上划划不掉、一键清理清不掉（你已实测验证）。\n" +
+                    "以后不用再做第二次，只有重新安装才需要重锁。"
+            )
+            .setPositiveButton("✅ 我锁好了") { _, _ ->
+                prefs.edit().putBoolean("taskLocked", true).apply()
+                lastStartKey = null
+                updateAll()
+                Toast.makeText(this, "已记住。守护从现在起划不掉也清不掉", Toast.LENGTH_LONG).show()
+                onDone?.invoke()
+            }
+            .setNegativeButton("稍后再锁") { _, _ ->
+                onDone?.invoke()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     /** 守护运行时：设置页整体锁住，只有输对家长密码才放行 */
@@ -429,7 +478,7 @@ class MainActivity : AppCompatActivity() {
             "🟢 守护运行中 · 今日剩余 %d 分 %02d 秒 · %d 秒后弹题"
                 .format(remain / 60, remain % 60, GuardCore.nextInSec(this))
         } else {
-            "⚪ 未启动 · 点第 ① 步开启保护，再点「② 开始守护」"
+            "⚪ 未启动 · 选好年级和间隔，点上面的「开始守护」即可"
         }
 
         val total = prefs.getInt("total", 0)
@@ -438,58 +487,127 @@ class MainActivity : AppCompatActivity() {
         val stats = if (total == 0) "答题统计：还没有答过题"
         else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
         val escTxt = if (escape > 0) "\n被强行结束时追加惩罚：$escape 次" else ""
-        diagTv.text = "v2.6\n${selfCheck()}\n${beatText()}\n$stats$escTxt\n" +
+        diagTv.text = "v3.0\n${selfCheck()}\n${beatText()}\n$stats$escTxt\n" +
             "上次动作：${prefs.getString("diag", "还没启动过")}"
         updateHint()
-        refreshAdminUi()
+        refreshStartBtn()
         refreshLockLayer()
     }
 
     /**
-     * 第 ① 步「防清理保护」与第 ② 步「开始守护」的联动配色：
-     * 点亮第 ① 步 → 开始守护变蓝；没点亮 → 灰色（点了只提示，并闪一下卡片）。
+     * 唯一主按钮的四态（v3.0）：
+     *   灰 → 蓝「开始守护」→ 点 → 绿「守护中·点此停止」→ 点 → 红「确认停止」
+     *   → 点 → 灰「已停止」→ 1.6 秒后回到蓝。
      *
-     * 只有一步：设备管理器。原先还有「去最近任务下拉锁卡片」的第二小步，v2.6 删掉了 ——
-     * 那是华为 SystemUI 的私有功能，App 没有 API 可以替用户完成，让家长手动做纯属添麻烦。
-     * 现在改为服务端自动进入「媒体播放」状态，由系统自己把本进程排除在清理名单外。
+     * 说明：灰色只表示「还不能开始」（缺悬浮窗权限，或刚停止），此时点它会自动
+     * 把家长送到权限页并记住这次意图，回来就自动接着启动 —— 不用点第二次。
+     * 设备管理器（防卸载）降级为使用须知里的一行可选开关，不再挡启动流程。
      */
-    private fun refreshAdminUi() {
-        val ready = isAdminActive()
+    private fun refreshStartBtn() {
+        val on = prefs.getBoolean("guardOn", false)
+        val overlayOk = Settings.canDrawOverlays(this)
+        val remain = GuardCore.remaining(this)
 
-        val key = ready.toString()
-        if (lastAdminKey == key) return   // 状态没变就别每秒钟重建一次背景
-        lastAdminKey = key
+        val key = "$on|$overlayOk|$stopArmed|$justStopped|${remain / 60}"
+        if (lastStartKey == key) return   // 状态没变就别每秒钟重建一次背景
+        lastStartKey = key
 
-        adminStateTv.text = if (ready) "✅ 已开启" else "未开启"
-        adminStateTv.setTextColor(Color.parseColor(if (ready) "#0B7A4B" else "#C0392B"))
-        adminDescTv.text = if (ready)
-            "已开启。剩下的防冻结、防清理都由 App 自己在后台处理，你不需要再设置别的。要卸载本 App 时，先点下面按钮取消。"
-        else
-            "点一次下面这个按钮、在系统弹窗里点「激活」就好，之后永久生效。开启后「② 开始守护」才会变蓝。"
-
-        if (ready) {
-            adminBtn.text = "✅ 防清理保护已开启（点此取消）"
-            adminBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E6F7EE"))
-            adminBtn.setTextColor(Color.parseColor("#0B7A4B"))
-        } else {
-            adminBtn.text = "🛡️ 一键开启防清理保护"
-            adminBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EDEBFF"))
-            adminBtn.setTextColor(Color.parseColor("#4B3BB3"))
+        when {
+            on && stopArmed -> {
+                startBtn.text = "■ 确认停止守护"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E5484D"))
+                startHintTv.text = "再点一次就停下来（4 秒内不点会自动取消）"
+                startHintTv.visibility = View.VISIBLE
+            }
+            on -> {
+                startBtn.text = "🟢 守护中 · 点此停止"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#0FA968"))
+                startHintTv.visibility = View.GONE
+            }
+            justStopped -> {
+                startBtn.text = "已停止"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#C9CEDA"))
+                startHintTv.text = "已停止 · 孩子现在可以正常玩了"
+                startHintTv.visibility = View.VISIBLE
+            }
+            overlayOk -> {
+                startBtn.text = "▶ 开始守护"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#2F6BFF"))
+                startHintTv.text = "点一下就好，缺的权限会自动带你逐项打开"
+                startHintTv.visibility = View.VISIBLE
+            }
+            else -> {
+                startBtn.text = "▶ 开始守护"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#C9CEDA"))
+                startHintTv.text = "还差「显示在其他应用上层」权限：点这个按钮会带你打开"
+                startHintTv.visibility = View.VISIBLE
+            }
         }
-
-        startBtn.backgroundTintList =
-            ColorStateList.valueOf(Color.parseColor(if (ready) "#2F6BFF" else "#C9CEDA"))
         startBtn.setTextColor(Color.WHITE)
-        startHintTv.visibility = if (ready) View.GONE else View.VISIBLE
+
+        // 使用须知底部那行：防卸载保护（设备管理器），可选，不挡启动
+        val adminOn = isAdminActive()
+        adminLine.text = if (adminOn)
+            "🛡️ 防卸载保护：已开启 · 点此关闭（关闭后才能卸载本 App）"
+        else
+            "🛡️ 防卸载保护：未开启 · 点此开启（可选，挡住孩子在设置里强行停止和卸载）"
+        adminLine.setTextColor(Color.parseColor(if (adminOn) "#0B7A4B" else "#B26A00"))
     }
 
-    /** 灰按钮被点了：把第 ① 步卡片闪两下，家长一眼就知道该先点哪里 */
-    private fun flashAdminCard() {
-        val blink = android.animation.ObjectAnimator.ofFloat(
-            adminCard, "alpha", 1f, 0.25f, 1f, 0.25f, 1f
-        )
-        blink.duration = 700L
-        blink.start()
+    /** 主按钮点击：一个按钮走完开始 / 停止，颜色跟着变 */
+    private fun onMainButton() {
+        val on = prefs.getBoolean("guardOn", false)
+
+        if (on) {
+            // 守护中：第一下变成红色确认，第二下才真停（防孩子/家长误点）
+            if (!stopArmed) {
+                stopArmed = true
+                stopArmUntil = System.currentTimeMillis() + 4000L
+                lastStartKey = null
+                refreshStartBtn()
+                Toast.makeText(this, "再点一次「确认停止守护」就停下来", Toast.LENGTH_SHORT).show()
+                uiHandler.postDelayed({
+                    if (stopArmed && System.currentTimeMillis() >= stopArmUntil) {
+                        stopArmed = false
+                        lastStartKey = null
+                        refreshStartBtn()
+                    }
+                }, 4300)
+                return
+            }
+            stopArmed = false
+            pendingStart = false
+            justStopped = true
+            QuizService.stop(this)
+            lastStartKey = null
+            updateAll()
+            Toast.makeText(this, "已停止守护", Toast.LENGTH_SHORT).show()
+            uiHandler.postDelayed({
+                justStopped = false
+                lastStartKey = null
+                refreshStartBtn()
+            }, 1600)
+            return
+        }
+
+        // 未守护：没悬浮窗权限先去开，回来 onResume 自动接着启动
+        if (!Settings.canDrawOverlays(this)) {
+            pendingStart = true
+            saveConfig()
+            Toast.makeText(this, "先把「显示在其他应用上层」打开，回来会自动开始", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                )
+            } catch (e: Exception) {
+                pendingStart = false
+            }
+            return
+        }
+
+        saveConfig()
+        pendingStart = true
+        runStartChain()
     }
 
     /**
@@ -519,7 +637,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun activateAdmin() {
         if (isAdminActive()) {
-            Toast.makeText(this, "✅ 已开启：孩子无法强行停止或清理掉守护", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "✅ 已开启：孩子不能在设置里强行停止，也不能直接卸载", Toast.LENGTH_LONG).show()
             return
         }
         try {
@@ -527,12 +645,13 @@ class MainActivity : AppCompatActivity() {
             i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent())
             i.putExtra(
                 DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "开启后，答题守护才能在后台长期存活：孩子上滑卡片、用手机管家一键清理，都不会把守护清掉。\n\n" +
-                    "开启只需一次，之后不用再管。\n\n" +
-                    "以后要卸载本 App，请先回到首页第 ① 步点「取消」，否则系统不允许卸载。"
+                "开启后，孩子不能在「设置 → 应用 → 答题守护」里点「强行停止」，也不能直接卸载" +
+                    "（要先取消这项激活）。\n\n" +
+                    "这项是可选的，只影响防卸载，不影响正常守护。\n\n" +
+                    "以后要卸载本 App，回到本页点这行「防卸载保护」取消即可。"
             )
             startActivity(i)
-            Toast.makeText(this, "请点「激活」，这是让守护活下来的唯一必需步骤", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请点「激活」：这是防孩子自己卸载的唯一办法", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "这台手机不支持该设置，请改用系统「家长模式」限制", Toast.LENGTH_LONG).show()
         }
@@ -601,10 +720,11 @@ class MainActivity : AppCompatActivity() {
     private fun beatText(): String {
         val srv = if (QuizService.running) "✅" else "❌"
         val keep = if (QuizService.keepAlive) "✅" else "❌"
+        val media = if (QuizService.mediaReady) "✅" else "❌"
         val maxGap = prefs.getLong("maxGapSec", 0L)
         val gap = if (maxGap < 8) "后台连续运行 ✅"
         else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结设置」）"
-        return "服务 $srv 静音保活 $keep · $gap"
+        return "服务 $srv 静音保活 $keep 媒体播放 $media · $gap"
     }
 
     /* ================= 诊断工具（收进折叠区） ================= */

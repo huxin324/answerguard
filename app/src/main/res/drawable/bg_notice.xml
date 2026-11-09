@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 使用须知卡（v3.0）：浅红底 + 红色描边，常驻可见，教家长锁后台卡片 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#FFF6F5" />
+    <corners android:radius="16dp" />
+    <stroke
+        android:width="1.5dp"
+        android:color="#FFD9D5" />
+</shape>

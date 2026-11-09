@@ -171,8 +171,10 @@ class QuizService : Service() {
             ms.setPlaybackState(playingState())
             ms.setActive(true)
             mediaSession = ms
+            mediaReady = true
             GuardCore.diag(this, "已进入媒体播放状态（系统会按音乐类应用对待，不参与一键清理）")
         } catch (e: Throwable) {
+            mediaReady = false
             GuardCore.diag(this, "媒体会话建立失败：${e.javaClass.simpleName}")
         }
     }
@@ -418,6 +420,7 @@ class QuizService : Service() {
             mediaSession?.release()
         } catch (e: Throwable) { /* ignore */ }
         mediaSession = null
+        mediaReady = false
         running = false
         // 不清理 guardOn：系统杀进程后闹钟到点会重新唤醒服务，守护自动恢复
         super.onDestroy()
@@ -447,6 +450,9 @@ class QuizService : Service() {
 
         /** 静音媒体保活是否在跑 */
         @Volatile var keepAlive = false
+
+        /** 是否已经进入「媒体播放」状态（系统按音乐类应用对待，诊断显示用） */
+        @Volatile var mediaReady = false
 
         /** 当前用的是哪种闹钟（诊断显示） */
         @Volatile var alarmMode = ""

@@ -63,6 +63,11 @@ object GuardCore {
         } catch (e: Exception) { /* 通知失败不影响弹题 */ }
     }
 
+    companion object {
+        /** 每次到点弹题的初始题数：一次弹 5 题，答对才算过关（答错还会追加） */
+        const val QUIZ_BATCH = 5
+    }
+
     /* ================= 启动 / 恢复 ================= */
 
     /** 家长点「启动守护」：重置为全新的一天 */
@@ -182,9 +187,12 @@ object GuardCore {
             OverlayQuiz.get(c).showLock()
             diag(c, "今日时间用完 → 已锁屏")
         } else {
-            p.edit().putInt("remaining", rest).putLong("lastAtWall", now).apply()
+            // 到点弹题：一次压入 5 题（QUIZ_BATCH），答错还会额外追加
+            val batch = p.getInt("pending", 0) + QUIZ_BATCH
+            p.edit().putInt("remaining", rest).putInt("pending", batch)
+                .putLong("lastAtWall", now).apply()
             OverlayQuiz.get(c).showQuiz()
-            diag(c, "已弹题（今日还剩 ${rest / 60} 分 ${rest % 60} 秒）")
+            diag(c, "已弹题（本次 $QUIZ_BATCH 题 · 今日还剩 ${rest / 60} 分 ${rest % 60} 秒）")
         }
     }
 
@@ -235,7 +243,37 @@ object GuardCore {
         flushCounter++
         if (flushCounter >= 5) {
             flushCounter = 0
-            p.edit().putLong("lastAtWall", now).apply()
+            // lastBeatWall 是「进程还活着」的凭证：进程一旦被 force-stop，它就停在被杀那一刻，
+            // 家长下次打开 App 时用它算出守护中断了多久（见 onGapKilled）。
+            p.edit().putLong("lastAtWall", now).putLong("lastBeatWall", now).apply()
         }
+    }
+
+    /**
+     * 守护中断补罚（v2.7）。
+     *
+     * force-stop 之后第三方 App 没有任何办法把自己拉起来（系统会拒绝 startService），
+     * 所以"杀了就回不来"这一点绕不过去。但可以让"杀掉"变成一笔亏本账：
+     * 下次打开 App 时，把中断的那段时间照样从今日额度里扣掉，并按中断时长追加惩罚题。
+     * 孩子杀一次 10 分钟，代价是少 10 分钟 + 多答 7 道题，比老实答题难受得多。
+     */
+    fun onGapKilled(c: Context, gapMin: Long) {
+        val p = prefs(c)
+        val now = System.currentTimeMillis()
+        val pen = p.getInt("penalty", 2).coerceIn(1, 3)
+        val extra = minOf((gapMin / 2).toInt(), 6)            // 每中断 2 分钟多 1 题，最多 +6
+        val addQ = pen + extra
+        val remain = p.getInt("remaining", p.getInt("dailyMin", 30) * 60)
+        val dockSec = minOf(remain, (gapMin * 60).toInt())     // 中断期间照样算使用时长
+        val esc = p.getInt("escapes", 0) + 1
+        p.edit()
+            .putInt("escapes", esc)
+            .putInt("pending", p.getInt("pending", 0) + addQ)
+            .putInt("remaining", remain - dockSec)
+            .putLong("lastBeatWall", now)
+            .putLong("lastAtWall", now)
+            .apply()
+        lastAtWall = now
+        diag(c, "守护中断 ${gapMin} 分钟（第 $esc 次被结束）→ 扣除 $dockSec 秒、追加 $addQ 题")
     }
 }

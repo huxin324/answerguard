@@ -288,78 +288,14 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- ========== 第 ① 步：防清理保护（2 小步，都完成才能启动） ========== -->
-            <LinearLayout
-                android:id="@+id/adminCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/bg_section"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="① 防清理保护"
-                        android:textColor="#1F2430"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/adminStateTv"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="未完成"
-                        android:textColor="#C0392B"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/adminDescTv"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:lineSpacingExtra="2dp"
-                    android:text="点一次下面这个按钮、在系统弹窗里点「激活」就好，之后永久生效。开启后「② 开始守护」才会变蓝。"
-                    android:textColor="#7A8194"
-                    android:textSize="12sp" />
-
-                <Button
-                    android:id="@+id/adminBtn"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="10dp"
-                    android:backgroundTint="#EDEBFF"
-                    android:text="🛡️ 一键开启防清理保护"
-                    android:textColor="#4B3BB3"
-                    android:textSize="15sp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="防冻结、防清理都在后台自动处理，不用再去系统设置里点别的"
-                    android:textColor="#9AA3B5"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <!-- ========== 第 ② 步：开始守护（灰＝未就绪，蓝＝可启动） ========== -->
+            <!-- ========== 唯一主按钮（v3.0）：灰/蓝＝开始守护，绿＝守护中，红＝确认停止 ========== -->
             <Button
                 android:id="@+id/startBtn"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
                 android:layout_marginTop="14dp"
                 android:backgroundTint="#C9CEDA"
-                android:text="② 开始守护"
+                android:text="▶ 开始守护"
                 android:textColor="#FFFFFF"
                 android:textSize="18sp" />
 
@@ -369,34 +305,62 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="7dp"
                 android:gravity="center"
-                android:text="点亮上面第 ① 步，这个按钮立刻变蓝"
+                android:text="点一下就好，缺的权限会自动带你逐项打开"
                 android:textColor="#9AA3B5"
                 android:textSize="12sp" />
 
+            <!-- ========== 使用须知（常驻可见）：教家长锁后台卡片 ========== -->
             <LinearLayout
+                android:id="@+id/noticeCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="horizontal">
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_notice"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-                <Button
-                    android:id="@+id/testBtn"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="#FFFFFF"
-                    android:text="立即试弹一题"
-                    android:textColor="#2F6BFF" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📌 使用须知"
+                    android:textColor="#C0392B"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
 
-                <Button
-                    android:id="@+id/stopBtn"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="#FFFFFF"
-                    android:text="停止守护"
-                    android:textColor="#7A8194" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="7dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="1 · 点上面的大按钮开始守护，缺的系统权限会自动带你一项一项打开，回来自动继续，不用自己找。\n2 · 启动后会教你把后台卡片锁住（只需一次）：从屏幕底部上滑并停住 → 找到「答题守护」→ 按住卡片往下拉 → 点 🔒。\n3 · 锁好之后：上划划不掉、一键清理也清不掉；孩子点开卡片只能看到家长密码屏。\n4 · 换手机、重装 App 才需要重新锁一次。"
+                    android:textColor="#8C4038"
+                    android:textSize="12.5sp" />
+
+                <TextView
+                    android:id="@+id/adminLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="11dp"
+                    android:background="@drawable/bg_field"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="12dp"
+                    android:paddingTop="10dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="10dp"
+                    android:text="🛡️ 防卸载保护：未开启 · 点此开启（可选，挡住孩子在设置里强行停止和卸载）"
+                    android:textColor="#B26A00"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="点本卡片可随时重看锁卡片的方法"
+                    android:textColor="#C39A93"
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <TextView
@@ -404,7 +368,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="⚪ 未启动"
+                android:text="⚪ 未启动 · 选好年级和间隔，点上面的「开始守护」即可"
                 android:textColor="#1F2430"
                 android:textSize="15sp"
                 android:textStyle="bold" />
