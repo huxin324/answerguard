@@ -7,8 +7,11 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
@@ -16,12 +19,19 @@ import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 /**
- * 家长设置页 + 启动/停止守护
+ * 家长页（v2.2）：
+ * 打开 App → 年级 / 弹题间隔 / 出题科目 / 语音 / 答题倒计时 / 加题 / 今日上限 / 密码
+ * 全部直接可见可点（不再折叠隐藏），选好点一次「开始守护」即可。
+ *
+ * 权限（悬浮窗/通知/省电/闹钟）不需要家长挨个找按钮：
+ * 点「开始守护」后自动逐个弹出系统授权框，每授权一项回来就自动继续下一项，全程只点一次。
+ * 仅「诊断与修复」工具仍折叠，日常看不到。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -37,8 +47,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chkEnglish: CheckBox
     private lateinit var voiceChk: CheckBox
     private lateinit var statusTv: TextView
-    private lateinit var statsTv: TextView
     private lateinit var autoTv: TextView
+    private lateinit var diagTv: TextView
+    private lateinit var diagBox: View
+
+    /** 「开始守护」的一键链式启动标记：授权回来 onResume 自动接着跑 */
+    private var pendingStart = false
 
     private val gradeNames = listOf(
         "一年级", "二年级", "三年级", "四年级", "五年级", "六年级", "七年级", "八年级", "九年级"
@@ -46,6 +60,14 @@ class MainActivity : AppCompatActivity() {
     private val intervalValues = listOf(30, 60, 180, 300, 600)
     private val quizTimeValues = listOf(30, 60, 120, 300, 600)
     private val dailyValues = listOf(5, 20, 30, 60)
+
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val refresher = object : Runnable {
+        override fun run() {
+            updateAll()
+            uiHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,15 +85,17 @@ class MainActivity : AppCompatActivity() {
         chkEnglish = findViewById(R.id.chkEnglish)
         voiceChk = findViewById(R.id.voiceChk)
         voiceChk.isChecked = prefs.getBoolean("voice", true)
+        pwdEt.setText(prefs.getString("pwd", "1234"))
         statusTv = findViewById(R.id.statusTv)
-        statsTv = findViewById(R.id.statsTv)
         autoTv = findViewById(R.id.autoTv)
+        diagTv = findViewById(R.id.diagTv)
+        diagBox = findViewById(R.id.diagBox)
 
         gradeSp.adapter = makeAdapter(gradeNames)
         gradeSp.setSelection(prefs.getInt("grade", 3) - 1)
         updateAutoLabel()
         gradeSp.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
                 updateAutoLabel()
             }
             override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
@@ -94,77 +118,76 @@ class MainActivity : AppCompatActivity() {
         chkChinese.isChecked = subs.contains("chinese")
         chkEnglish.isChecked = subs.contains("english")
 
-        findViewById<Button>(R.id.startBtn).setOnClickListener { startGuard() }
+        findViewById<Button>(R.id.startBtn).setOnClickListener {
+            saveConfig()
+            pendingStart = true
+            runStartChain()
+        }
         findViewById<Button>(R.id.stopBtn).setOnClickListener {
+            pendingStart = false
             QuizService.stop(this)
-            updateStatus()
+            updateAll()
             Toast.makeText(this, "已停止守护", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.testBtn).setOnClickListener {
             saveConfig()
             QuizService.test(this)
-            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（测试不会开始计时）", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "测试弹窗已弹出，答对即可关闭（不影响计时）", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
-        findViewById<Button>(R.id.a11yBtn).setOnClickListener { openA11y() }
         findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
-            if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "请先打开「显示在其他应用上层」权限", Toast.LENGTH_LONG).show()
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                )
-                return@setOnClickListener
-            }
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
-            QuizService.start(this)
-            updateStatus()
-            Toast.makeText(
-                this, "已启动守护，10 秒后自动弹题——请立刻切到抖音等着", Toast.LENGTH_LONG
-            ).show()
-            // 页面自动退出，孩子在上滑列表里找不到本 App，也就没法「清理」它
-            uiHandler.postDelayed({ removeFromRecents() }, 2000)
+            pendingStart = true
+            runStartChain()
+            Toast.makeText(this, "10 秒后会自动弹题，请马上切到抖音等着", Toast.LENGTH_LONG).show()
+        }
+        findViewById<TextView>(R.id.diagToggle).setOnClickListener {
+            diagBox.visibility = if (diagBox.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // 守护已开启但服务死了（被系统杀/冻结后闹钟还没到）→ 打开 App 时立刻自动拉起，
-        // 同时把闹钟重新排上，保证回到后台后还能继续弹题
+        // 守护开着但服务死了（被系统杀/冻结）→ 打开 App 时立刻自动拉起
         if (prefs.getBoolean("guardOn", false) && !QuizService.running) {
             QuizService.resume(this)
         }
-        updateStatus()
+        // 一键启动链：授权回来后自动继续下一项
+        runStartChain()
+        updateAll()
         uiHandler.post(refresher)
     }
 
     override fun onPause() {
         uiHandler.removeCallbacks(refresher)
+        // 设置项现在都是直接可见的，改完不用再找按钮：离开页面就记住
+        try { saveConfig() } catch (e: Exception) { /* 控件未就绪时忽略 */ }
         super.onPause()
     }
 
-    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    /** 每秒刷新状态，让家长看到「下次弹题 X 秒」真的在倒数 */
-    private val refresher = object : Runnable {
-        override fun run() {
-            updateStatus()
-            uiHandler.postDelayed(this, 1000)
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                runStartChain()
+            } else {
+                pendingStart = false
+                Toast.makeText(this, "没开通知权限也能运行，只是后台通知不显示", Toast.LENGTH_LONG).show()
+                runStartChain()
+            }
         }
     }
 
     private fun makeAdapter(data: List<String>) =
         ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, data)
 
-    /** 显示当前自动匹配到的学期与教材进度 */
     private fun updateAutoLabel() {
         val g = gradeSp.selectedItemPosition + 1
         val sem = QuestionBank.currentSemester()
-        val stage = when {
-            g <= 6 -> "小学"
-            else -> "初中"
-        }
-        autoTv.text = "📚 已自动匹配：${stage}${g}年级${if (sem == 1) "上" else "下"}学期 · 按人教版知识点出题"
+        val stage = if (g <= 6) "小学" else "初中"
+        autoTv.text = "📚 已自动匹配：${stage}${g}年级${if (sem == 1) "上" else "下"}学期 · 人教版"
     }
 
     private fun saveConfig() {
@@ -186,37 +209,150 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    private fun startGuard() {
-        // 1. 必须先授予「显示在其他应用上层」（悬浮窗）权限
+    /* ================= 一键启动链（家长只点一次） ================= */
+
+    /**
+     * 缺哪项权限就自动去要哪项；授权回来 onResume 会自动再进来接着跑。
+     * 四项全齐后启动服务，2.5 秒后页面自动收起（从最近任务里移除，孩子划不到）。
+     */
+    private fun runStartChain() {
+        if (!pendingStart) return
+
+        // ① 悬浮窗：核心权限，没有它弹不了题
         if (!Settings.canDrawOverlays(this)) {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            )
-            Toast.makeText(this, "请先打开「显示在其他应用上层」开关，再回来点启动", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                )
+                Toast.makeText(this, "打开「显示在其他应用上层」，返回后自动继续", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                pendingStart = false
+            }
             return
         }
-        // 2. 通知权限（安卓 13+），保证后台常驻通知可见
+
+        // ② 通知权限（安卓 13+）
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            return
         }
 
-        saveConfig()
-        QuizService.start(this)
-        updateStatus()
+        // ③ 省电豁免：防止后台被冻结
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            var asked = false
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                asked = true
+            } catch (e: Exception) { /* 有的系统不给弹，跳过 */ }
+            if (asked) {
+                Toast.makeText(this, "弹出的对话框点「允许」，之后自动继续", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
 
-        // 3. 无障碍只是加分项：华为/鸿蒙禁止「侧载安装」的 App 开启无障碍
-        //    （会提示"应用暂不支持获取系统无障碍权限"），所以不再当必要条件。
-        //    主保活手段已换成服务里的「静音媒体保活 + 每秒心跳」，不依赖无障碍。
+        // ④ 精确闹钟（安卓 12+）
+        if (Build.VERSION.SDK_INT >= 31) {
+            val am = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            if (!am.canScheduleExactAlarms()) {
+                var asked = false
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                            Uri.parse("package:$packageName")
+                        )
+                    )
+                    asked = true
+                } catch (e: Exception) { /* 没这个页面就跳过 */ }
+                if (asked) {
+                    Toast.makeText(this, "打开「闹钟和提醒」开关，返回后自动继续", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+        }
+
+        // 四项齐了 → 启动守护
+        pendingStart = false
+        QuizService.start(this)
+        updateAll()
         Toast.makeText(
             this,
-            "✅ 守护已启动：静音媒体保活已开启，切到别的 App 也会准时弹题",
+            "✅ 已启动！页面马上自动收起（防止孩子从上滑列表划掉），切到孩子的 App 等弹题即可",
             Toast.LENGTH_LONG
         ).show()
+        uiHandler.postDelayed({ removeFromRecents() }, 2500)
+    }
 
-        // 4. 省电豁免（第二重保险）
+    /** 把自己从「最近任务」移除：孩子上滑看不到这张卡片，划不掉也清理不掉 */
+    private fun removeFromRecents() {
+        try {
+            finishAndRemoveTask()
+        } catch (e: Throwable) {
+            finish()
+        }
+    }
+
+    /* ================= 状态显示 ================= */
+
+    private fun updateAll() {
+        val on = prefs.getBoolean("guardOn", false)
+        val remain = GuardCore.remaining(this)
+        statusTv.text = if (on) {
+            "🟢 守护运行中 · 今日剩余 %d 分 %02d 秒 · %d 秒后弹题"
+                .format(remain / 60, remain % 60, GuardCore.nextInSec(this))
+        } else {
+            "⚪ 未启动 · 选好年级和间隔，点「开始守护」"
+        }
+
+        val total = prefs.getInt("total", 0)
+        val ok = prefs.getInt("ok", 0)
+        val stats = if (total == 0) "答题统计：还没有答过题"
+        else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
+        diagTv.text = "v2.2\n${selfCheck()}\n${beatText()}\n$stats\n上次动作：${prefs.getString("diag", "还没启动过")}"
+    }
+
+    private fun selfCheck(): String {
+        val overlay = if (Settings.canDrawOverlays(this)) "✅" else "❌"
+        val notif = if (Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) "✅" else "❌"
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
+        val exact = if (Build.VERSION.SDK_INT < 31 ||
+            (getSystemService(ALARM_SERVICE) as android.app.AlarmManager).canScheduleExactAlarms()
+        ) "✅" else "❌"
+        return "权限 悬浮窗 $overlay 通知 $notif 省电 $battery 闹钟 $exact"
+    }
+
+    private fun beatText(): String {
+        val srv = if (QuizService.running) "✅" else "❌"
+        val keep = if (QuizService.keepAlive) "✅" else "❌"
+        val maxGap = prefs.getLong("maxGapSec", 0L)
+        val gap = if (maxGap < 8) "后台连续运行 ✅"
+        else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结设置」）"
+        return "服务 $srv 静音保活 $keep · $gap"
+    }
+
+    /* ================= 诊断工具（收进折叠区） ================= */
+
+    private fun fixNext() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            )
+            Toast.makeText(this, "① 打开「显示在其他应用上层」", Toast.LENGTH_LONG).show()
+            return
+        }
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
             try {
@@ -226,81 +362,47 @@ class MainActivity : AppCompatActivity() {
                         Uri.parse("package:$packageName")
                     )
                 )
-                Toast.makeText(this, "请点「允许」——不让系统冻结后台，离开 App 才能正常弹题", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "② 点「允许」", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
-                Toast.makeText(this, "提示：请点「🔧 一键修复权限」把「省电豁免」补上", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "请到 设置→电池→应用耗电管理 选「不受限制」", Toast.LENGTH_LONG).show()
             }
-        }
-
-        // 5. 最关键的一步（v2.0）：把「答题守护」从最近任务里彻底移除。
-        //    孩子在多任务列表里看不到这张卡片，就没有「上划划掉 / 一键清理」的机会；
-        //    而守护本身是服务 + 悬浮窗，不依赖这个页面，关掉页面不影响计时和弹题。
-        uiHandler.postDelayed({
-            Toast.makeText(
-                this,
-                "页面会自动关闭：孩子在上滑列表里看不到守护，也没法清理它（随时可点图标回来）",
-                Toast.LENGTH_LONG
-            ).show()
-            removeFromRecents()
-        }, 2500)
-    }
-
-    /** 把自己从「最近任务」里彻底移除 —— 这是防「上划划掉 / 一键清理」的关键 */
-    private fun removeFromRecents() {
-        try {
-            finishAndRemoveTask()
-        } catch (e: Throwable) {
-            finish()
-        }
-    }
-
-    /** 无障碍（华为对侧载 App 会拦截，仅作可选加分项） */
-    private fun openA11y() {
-        if (GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(this, "✅ 无障碍已开启，会额外多一层保障", Toast.LENGTH_LONG).show()
             return
         }
-        Toast.makeText(
-            this,
-            "华为不允许侧载应用开无障碍（会提示「暂不支持」）。跳过没关系——已用静音保活替代，直接点「启动守护」即可。",
-            Toast.LENGTH_LONG
-        ).show()
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("关于「无障碍」")
-            .setMessage(
-                "华为/鸿蒙出于隐私策略，禁止「非华为应用市场安装」的 App 开启无障碍服务，" +
-                    "所以系统会提示「应用暂不支持获取系统无障碍权限」，这不是 App 的问题，也不是你没点对。\n\n" +
-                    "v1.7 已经不再依赖无障碍：改用「静音媒体保活 + 每秒心跳 + 系统闹钟」三重机制，" +
-                    "让守护进程像音乐 App 一样常驻，不会被系统冻结。\n\n" +
-                    "所以这一步可以跳过，直接点「▶️ 启动守护」。"
-            )
-            .setPositiveButton("知道了", null)
-            .show()
+        if (Build.VERSION.SDK_INT >= 31) {
+            val am = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            if (!am.canScheduleExactAlarms()) {
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                            Uri.parse("package:$packageName")
+                        )
+                    )
+                    Toast.makeText(this, "③ 打开「闹钟和提醒」开关", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "③ 到 设置→应用→答题守护→闹钟和提醒 里允许", Toast.LENGTH_LONG).show()
+                }
+                return
+            }
+        }
+        updateAll()
+        Toast.makeText(this, "✅ 权限都齐了", Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * 直达华为「应用启动管理」页面：把自启动/关联启动/后台活动三项打开，
-     * 这是华为手机防止 App 后台被冻结、闹钟被压住的官方开关。
-     */
     private fun openHuaweiStartup() {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("📱 华为防冻结：这 2 步一定要做")
+        AlertDialog.Builder(this)
+            .setTitle("📱 华为防冻结（2 步）")
             .setMessage(
-                "第 1 步：设置 → 电池 → 应用耗电管理（或「更多电池设置」）→ 答题守护 → " +
-                    "选「允许后台活动 / 不受限制」\n\n" +
-                    "第 2 步：设置 → 应用和服务 → 应用启动管理 → 答题守护 → " +
-                    "关掉「自动管理」，弹出的「自启动 / 关联启动 / 后台活动」三项全部打开\n\n" +
-                    "第 3 步：不用做了。v2.0 已把「答题守护」从最近任务里隐藏，" +
-                    "孩子上滑列表里看不到这张卡片，也就没法把它划掉或一键清理。\n\n" +
-                    "做完前 2 步，再点「▶️ 启动守护」，然后切到抖音等它弹题。"
+                "第 1 步：设置 → 电池 → 应用耗电管理 → 答题守护 → 选「允许后台活动 / 不受限制」\n\n" +
+                    "第 2 步：设置 → 应用和服务 → 应用启动管理 → 答题守护 → 关掉「自动管理」，" +
+                    "「自启动 / 关联启动 / 后台活动」三项全部打开\n\n" +
+                    "做完后回到本页，点「⚡ 10 秒后弹题」验证。"
             )
             .setPositiveButton("去启动管理") { _, _ -> jumpHuaweiStartup() }
-            .setNeutralButton("去应用信息页") { _, _ -> jumpAppDetail() }
             .setNegativeButton("知道了", null)
             .show()
     }
 
-    /** 尝试直达华为「应用启动管理」页面 */
     private fun jumpHuaweiStartup() {
         val candidates = listOf(
             android.content.ComponentName(
@@ -319,149 +421,15 @@ class MainActivity : AppCompatActivity() {
         for (cn in candidates) {
             try {
                 startActivity(Intent().setComponent(cn))
-                Toast.makeText(
-                    this,
-                    "找到「答题守护」→ 关掉「自动管理」→ 三项全开",
-                    Toast.LENGTH_LONG
-                ).show()
                 return
             } catch (e: Exception) { /* 试下一个入口 */ }
         }
-        jumpAppDetail()
-    }
-
-    private fun jumpAppDetail() {
         try {
             startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
             )
-            Toast.makeText(
-                this, "在应用信息里找「耗电管理」，选「允许后台活动」", Toast.LENGTH_LONG
-            ).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "请手动到 设置→应用→应用启动管理→答题守护 打开三项", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请手动到 设置→应用启动管理→答题守护 打开三项", Toast.LENGTH_LONG).show()
         }
-    }
-
-    /** 一键修复：每次点修第一个还缺的权限，修完一项再点一次 */
-    private fun fixNext() {
-        // ① 悬浮窗（全局弹窗的核心）
-        if (!Settings.canDrawOverlays(this)) {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            )
-            Toast.makeText(this, "① 打开「允许显示在其他应用上层」，返回后再点一次", Toast.LENGTH_LONG).show()
-            return
-        }
-        // ② 通知（前台服务常驻通知）
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            try {
-                startActivity(
-                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                )
-                Toast.makeText(this, "② 把「通知」开关打开，返回后再点一次", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-            }
-            return
-        }
-        // ③ 省电豁免（防止后台服务被杀）
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-                Toast.makeText(this, "③ 点「允许」别限制后台，返回后再点一次", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                try {
-                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                    Toast.makeText(this, "③ 找到「答题守护」→ 选「不受限制」", Toast.LENGTH_LONG).show()
-                } catch (e2: Exception) {
-                    Toast.makeText(this, "请手动到 设置→电池→应用耗电管理 选「不受限制」", Toast.LENGTH_LONG).show()
-                }
-            }
-            return
-        }
-        // ④ 精确闹钟：安卓 12+ 需要单独允许，否则「复活闹钟」可能被系统延后
-        if (Build.VERSION.SDK_INT >= 31) {
-            val am = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
-            if (!am.canScheduleExactAlarms()) {
-                try {
-                    startActivity(
-                        Intent(
-                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                            Uri.parse("package:$packageName")
-                        )
-                    )
-                    Toast.makeText(this, "④ 打开「闹钟和提醒」开关，返回后再点一次", Toast.LENGTH_LONG).show()
-                } catch (e: Exception) {
-                    Toast.makeText(this, "④ 请到 设置→应用→答题守护→闹钟和提醒 里允许", Toast.LENGTH_LONG).show()
-                }
-                return
-            }
-        }
-        // ⑤ 无障碍：华为禁止侧载应用开启，仅当已经开了才提示，不作为必需项
-        if (GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(this, "⑤ 无障碍已开（额外保障）", Toast.LENGTH_SHORT).show()
-        }
-        updateStatus()
-        Toast.makeText(
-            this,
-            "✅ 权限齐了：点「▶️ 启动守护」，再按「📱 华为防冻结」把 3 步做完，然后切到抖音等弹题",
-            Toast.LENGTH_LONG
-        ).show()
-    }
-
-    private fun updateStatus() {
-        val on = prefs.getBoolean("guardOn", false)
-        val remain = GuardCore.remaining(this)
-        statusTv.text = if (on) {
-            "v2.0 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v2.0 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
-
-        // 倒计时按「时间戳账本」算，进程被冻结也不会错
-        val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"
-        val cd = if (on) "距离下次弹题 ${GuardCore.nextInSec(this)} 秒（${GuardCore.modeText(this)}）" else "未计时"
-        statusTv.text = statusTv.text.toString() + "\n" + selfCheck() + "\n" + beatText() + "\n" + cd + "\n上次：" + diagTxt
-
-        val total = prefs.getInt("total", 0)
-        val ok = prefs.getInt("ok", 0)
-        val no = prefs.getInt("no", 0)
-        statsTv.text = if (total == 0) "累计答题 0 · 正确率 --"
-        else "累计答题 $total · 答对 $ok · 答错 $no · 正确率 ${ok * 100 / total}%"
-    }
-
-    /** 保活自检：告诉家长「进程在后台有没有被冻结过 / 复活闹钟有没有挂上」 */
-    private fun beatText(): String {
-        val srv = if (QuizService.running) "✅" else "❌"
-        val keep = if (QuizService.keepAlive) "✅" else "❌"
-        val alarm = if (QuizService.alarmMode.isBlank()) "—" else QuizService.alarmMode
-        val maxGap = prefs.getLong("maxGapSec", 0L)
-        val gap = if (maxGap < 8) "后台连续运行 ✅"
-        else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结」2 步）"
-        return "服务 $srv 静音保活 $keep 复活闹钟 $alarm · $gap"
-    }
-
-    /** 权限自检：哪一项是 ❌，就去系统里把那一项打开 */
-    private fun selfCheck(): String {
-        val overlay = if (Settings.canDrawOverlays(this)) "✅" else "❌"
-        val notif = if (Build.VERSION.SDK_INT < 33 ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        ) "✅" else "❌"
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
-        val exact = if (Build.VERSION.SDK_INT < 31 ||
-            (getSystemService(ALARM_SERVICE) as android.app.AlarmManager).canScheduleExactAlarms()
-        ) "✅" else "❌"
-        return "自检 弹窗 $overlay 通知 $notif 省电 $battery 闹钟 $exact"
     }
 }

@@ -203,8 +203,12 @@ class QuizService : Service() {
     }
 
     /**
-     * 统一排闹钟：① 精确闹钟（不占状态栏）→ ② 闹钟类闹钟（最不容易被系统压）→ ③ 宽松闹钟。
-     * 安卓 12+ 精确闹钟需要单独授权，没授权就自动退到闹钟类闹钟，不会因此不工作。
+     * 统一排闹钟。
+     *
+     * ① setAlarmClock（闹钟类）必须排第一：华为实测它不会被 Doze 延迟投递（v1.7~v1.9 靠它弹题成功），
+     *    且进程被杀后它也能把服务叫起来；代价只是状态栏短暂显示闹钟图标。
+     * ② setExactAndAllowWhileIdle 只作后备：华为 Doze 下会把这类精确闹钟压住不投递
+     *    （v2.0 把它排第一，结果进程被清后永远叫不回来 —— 这就是 v2.0 不弹题的根因）。
      */
     private fun arm(delaySec: Long, action: String, reqCode: Int) {
         val am = getSystemService(ALARM_SERVICE) as AlarmManager
@@ -213,18 +217,19 @@ class QuizService : Service() {
         val wall = System.currentTimeMillis() + delaySec * 1000L
 
         try {
-            if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
-                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsed, pi)
-                alarmMode = "精确闹钟"
-                return
-            }
-        } catch (e: Exception) { /* 退到下一种 */ }
-
-        try {
             am.setAlarmClock(AlarmManager.AlarmClockInfo(wall, null), pi)
             alarmMode = "闹钟"
             return
-        } catch (e: Exception) { /* 退到下一种 */ }
+        } catch (e: Exception) { /* 退到精确闹钟 */ }
+
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+                throw IllegalStateException("no exact alarm permission")
+            }
+            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsed, pi)
+            alarmMode = "精确闹钟"
+            return
+        } catch (e: Exception) { /* 退到宽松闹钟 */ }
 
         try {
             am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsed, pi)
