@@ -63,10 +63,12 @@ object GuardCore {
         } catch (e: Exception) { /* 通知失败不影响弹题 */ }
     }
 
-    companion object {
-        /** 每次到点弹题的初始题数：一次弹 5 题，答对才算过关（答错还会追加） */
-        const val QUIZ_BATCH = 5
-    }
+    /**
+     * 每次到点弹题的初始题数：一次弹 5 题，答对才算过关（答错还会追加）。
+     * 注意：本文件是 object GuardCore，object 里不能再写 companion object（编译报错
+     * 「Companion object is not allowed here」），常量直接写在 object 体内即可。
+     */
+    const val QUIZ_BATCH = 5
 
     /* ================= 启动 / 恢复 ================= */
 

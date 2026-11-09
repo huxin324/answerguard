@@ -487,7 +487,7 @@ class MainActivity : AppCompatActivity() {
         val stats = if (total == 0) "答题统计：还没有答过题"
         else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
         val escTxt = if (escape > 0) "\n被强行结束时追加惩罚：$escape 次" else ""
-        diagTv.text = "v3.0\n${selfCheck()}\n${beatText()}\n$stats$escTxt\n" +
+        diagTv.text = "v3.1\n${selfCheck()}\n${beatText()}\n$stats$escTxt\n" +
             "上次动作：${prefs.getString("diag", "还没启动过")}"
         updateHint()
         refreshStartBtn()
