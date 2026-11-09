@@ -12,6 +12,9 @@ import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -38,10 +41,22 @@ class QuizService : Service() {
     private val h = Handler(Looper.getMainLooper())
     private var silentTrack: AudioTrack? = null
 
+    /**
+     * 媒体会话（v2.6 新增）：只开静音 AudioTrack 还不够，系统的「正在播放」判定要看
+     * MediaSession 的状态。把它置为 STATE_PLAYING，本进程在系统眼里就是一个"正在放音乐的 App"，
+     * 华为手机管家的一键清理会跳过正在播放媒体的应用，上划卡片也会被当成"正在播放"而不是普通后台。
+     * 这一步完全自动，不需要家长去最近任务里手动下拉加锁（那个加锁是 SystemUI 私有功能，App 无 API 可调）。
+     */
+    private var mediaSession: MediaSession? = null
+    private var beatCount = 0
+
     private val ticker = object : Runnable {
         override fun run() {
             try {
                 GuardCore.tick(this@QuizService)
+                // 每 10 秒刷一次「正在播放」状态，防止被 ROM 当成僵死会话清掉
+                beatCount++
+                if (beatCount % 10 == 0) refreshPlayback()
                 // 每次心跳都把「复活闹钟」往后推 6 秒：只要进程活着，系统里就永远有一个
                 // 6 秒后的闹钟等着接手；进程一旦被杀，这个闹钟就会把我们重新叫起来。
                 // 只在「守护已开启 + 亮屏」时挂这个短闹钟（息屏本来就不计时，避免整夜反复唤醒耗电）
@@ -66,19 +81,15 @@ class QuizService : Service() {
                 NotificationChannel(CHANNEL_ID, "守护运行中", NotificationManager.IMPORTANCE_LOW)
             )
         }
-        val n: Notification = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-            .setContentTitle("答题守护运行中")
-            .setContentText("到时间会自动弹题，请勿在设置里关闭本应用")
-            .setOngoing(true)
-            .build()
+        startMediaSession()             // ①-a 先立起「正在播放」身份
+        val n = buildGuardNotification()
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            startForeground(1, n, fgType())
         } else {
             startForeground(1, n)
         }
-
-        startSilentKeepAlive()          // ① 媒体保活
+        startSilentKeepAlive()          // ①-b 媒体保活（真正的静音音频）
+        startGhostWindow()              // ①-c 隐形常驻窗口
         h.removeCallbacks(ticker)
         h.post(ticker)                  // ② 每秒心跳
 
@@ -134,7 +145,128 @@ class QuizService : Service() {
         return START_STICKY
     }
 
-    /* ================= ① 媒体级静音保活 ================= */
+    /* ================= ①-a 「正在播放」身份（自动防清理的关键） ================= */
+
+    /**
+     * 建立媒体会话，把状态置成 PLAYING。
+     *
+     * 为什么能防「一键清理」：厂商清理逻辑（华为手机管家、最近任务上划）通常会保留
+     * 「正在播放音频/视频」的进程，因为杀掉会中断用户正在听的东西。我们放的是无声 PCM，
+     * 但系统判定「是否在播放」看的是 AudioTrack.isPlaying + MediaSession 的 PlaybackState。
+     * 只做前者，部分 ROM 仍当普通后台；两个都做，才会被归到「媒体播放」这一类。
+     *
+     * 副作用：音量键会显示媒体音量条、通知会带媒体样式。都可以接受，比被杀掉强。
+     * 不去申请 AudioFocus（否则会把孩子正在听的歌/视频顶停，反而露馅）。
+     */
+    private fun startMediaSession() {
+        if (mediaSession != null) return
+        try {
+            val ms = MediaSession(this, "AnswerGuard")
+            ms.setMetadata(
+                MediaMetadata.Builder()
+                    .putString(MediaMetadata.METADATA_KEY_TITLE, "答题守护")
+                    .putString(MediaMetadata.METADATA_KEY_ARTIST, "运行中")
+                    .build()
+            )
+            ms.setPlaybackState(playingState())
+            ms.setActive(true)
+            mediaSession = ms
+            GuardCore.diag(this, "已进入媒体播放状态（系统会按音乐类应用对待，不参与一键清理）")
+        } catch (e: Throwable) {
+            GuardCore.diag(this, "媒体会话建立失败：${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun playingState(): PlaybackState =
+        PlaybackState.Builder()
+            // 只声明「播放中」，不给任何可点的 action —— 通知上没有暂停键，孩子没法暂停保活
+            .setActions(0)
+            .setState(PlaybackState.STATE_PLAYING, SystemClock.elapsedRealtime(), 1.0f)
+            .build()
+
+    /** 心跳里定期刷新播放位置：部分 ROM 会把「状态长时间不更新」的会话当死会话清掉 */
+    private fun refreshPlayback() {
+        try {
+            mediaSession?.setPlaybackState(playingState())
+            // AudioTrack 万一被系统打断（来电、其他 App 抢音频），在这里重新 play 起来
+            silentTrack?.let { if (it.playState != AudioTrack.PLAYSTATE_PLAYING) it.play() }
+        } catch (e: Throwable) { /* 忽略，下一轮再试 */ }
+    }
+
+    private fun fgType(): Int =
+        if (Build.VERSION.SDK_INT >= 29)
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        else 0
+
+    /** 通知：媒体样式 + 绑定会话，进一步坐实「这是一个正在播放的媒体应用」 */
+    private fun buildGuardNotification(): Notification {
+        val nb =
+            if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID)
+            else Notification.Builder(this)
+        nb.setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+            .setContentTitle("答题守护运行中")
+            .setContentText("到时间会自动弹题")
+            .setOngoing(true)
+            .setShowWhen(false)
+        try {
+            val style = Notification.MediaStyle()
+            mediaSession?.let { style.setMediaSession(it.sessionToken) }
+            nb.setStyle(style)
+        } catch (e: Throwable) { /* 个别 ROM 不支持媒体样式就用普通通知 */ }
+        return nb.build()
+    }
+
+    /* ================= ①-c 隐形常驻窗口（第 4 重保险） ================= */
+
+    /**
+     * 挂一个 1×1 像素、透明度 0.01 的窗口。
+     *
+     * 为什么有用：系统的「移除任务 / 一键清理」优先结束"纯后台"的进程；
+     * 而带有可见窗口（Overlay）的应用仍处于可见状态，清理逻辑会更保守。
+     * 窗口不可见、不可点、不抢焦点，除了一行权限说明外对家长没有任何感知。
+     *
+     * 注意：只在开关打开且已经授予悬浮窗权限时才挂，任何异常都静默跳过——
+     * 失败也不影响前 3 重保险。
+     */
+    private var ghostView: android.view.View? = null
+
+    private fun startGhostWindow() {
+        if (ghostView != null) return
+        if (!android.provider.Settings.canDrawOverlays(this)) return
+        try {
+            val wm = getSystemService(WINDOW_SERVICE) as android.view.WindowManager
+            val v = android.view.View(this)
+            val type = if (Build.VERSION.SDK_INT >= 26)
+                android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                android.view.WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+            val lp = android.view.WindowManager.LayoutParams(
+                1, 1, type,
+                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                android.graphics.PixelFormat.TRANSLUCENT
+            )
+            lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            lp.x = 0
+            lp.y = 0
+            lp.alpha = 0.01f
+            wm.addView(v, lp)
+            ghostView = v
+        } catch (e: Throwable) {
+            GuardCore.diag(this, "常驻窗口未挂上（不影响弹题）：${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun stopGhostWindow() {
+        try {
+            ghostView?.let {
+                (getSystemService(WINDOW_SERVICE) as android.view.WindowManager).removeView(it)
+            }
+        } catch (e: Throwable) { /* ignore */ }
+        ghostView = null
+    }
+
+    /* ================= ①-b 媒体级静音保活 ================= */
 
     private fun startSilentKeepAlive() {
         if (silentTrack != null) return
@@ -275,6 +407,17 @@ class QuizService : Service() {
     override fun onDestroy() {
         h.removeCallbacks(ticker)
         stopSilentKeepAlive()
+        stopGhostWindow()
+        try {
+            mediaSession?.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_STOPPED, 0L, 0f)
+                    .build()
+            )
+            mediaSession?.isActive = false
+            mediaSession?.release()
+        } catch (e: Throwable) { /* ignore */ }
+        mediaSession = null
         running = false
         // 不清理 guardOn：系统杀进程后闹钟到点会重新唤醒服务，守护自动恢复
         super.onDestroy()

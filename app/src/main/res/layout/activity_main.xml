@@ -1,459 +1,542 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#F5F6F8">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:layout_height="match_parent"
+        android:background="#F5F6F8">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🛡️ 答题守护"
-            android:textColor="#1F2430"
-            android:textSize="24sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="14dp"
-            android:text="孩子玩到点自动弹题 · 答对继续玩 · 答错加题"
-            android:textColor="#7A8194"
-            android:textSize="13sp" />
-
-        <!-- 华为「后台弹窗」缺口提示：只有检测到弹不出来时才出现，点一下直达开关页 -->
         <LinearLayout
-            android:id="@+id/hintCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:background="@drawable/bg_hint"
-            android:clickable="true"
-            android:focusable="true"
-            android:orientation="horizontal"
-            android:padding="12dp"
-            android:visibility="gone">
+            android:orientation="vertical"
+            android:padding="20dp">
 
             <TextView
-                android:id="@+id/hintTv"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:lineSpacingExtra="2dp"
-                android:text="⚠️ 华为还需打开「后台弹窗」权限，否则离开本页后弹不出来"
-                android:textColor="#C0392B"
+                android:text="🛡️ 答题守护"
+                android:textColor="#1F2430"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="14dp"
+                android:text="孩子玩到点自动弹题 · 答对继续玩 · 答错加题"
+                android:textColor="#7A8194"
                 android:textSize="13sp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:layout_marginStart="8dp"
-                android:text="去打开 ›"
-                android:textColor="#C0392B"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <!-- ========== 卡片一：年级与频率 ========== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_section"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="孩子年级"
-                android:textColor="#1F2430"
-                android:textSize="15sp" />
-
-            <Spinner
-                android:id="@+id/gradeSp"
+            <!-- 华为「后台弹窗」缺口提示：只有检测到弹不出来时才出现，点一下直达开关页 -->
+            <LinearLayout
+                android:id="@+id/hintCard"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_spinner"
-                android:paddingStart="14dp"
-                android:paddingEnd="40dp" />
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_hint"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/hintTv"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:lineSpacingExtra="2dp"
+                    android:text="⚠️ 华为还需打开「后台弹窗」权限，否则离开本页后弹不出来"
+                    android:textColor="#C0392B"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="8dp"
+                    android:text="去打开 ›"
+                    android:textColor="#C0392B"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- ========== 卡片一：年级与频率 ========== -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_section"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="孩子年级"
+                    android:textColor="#1F2430"
+                    android:textSize="15sp" />
+
+                <Spinner
+                    android:id="@+id/gradeSp"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="40dp" />
+
+                <TextView
+                    android:id="@+id/autoTv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="📚 已自动匹配：按人教版知识点出题"
+                    android:textColor="#2F6BFF"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="多久弹一次题"
+                    android:textColor="#1F2430"
+                    android:textSize="15sp" />
+
+                <Spinner
+                    android:id="@+id/intervalSp"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="40dp" />
+            </LinearLayout>
+
+            <!-- ========== 卡片二：出题与答题（常驻可见） ========== -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_section"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="出题科目"
+                    android:textColor="#1F2430"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:orientation="horizontal">
+
+                    <CheckBox
+                        android:id="@+id/chkMath"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🧮 数学"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/chkChinese"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📖 语文"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/chkEnglish"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🔤 英语"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <CheckBox
+                    android:id="@+id/voiceChk"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="🔊 答错时语音讲解"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="答题倒计时"
+                            android:textColor="#7A8194"
+                            android:textSize="12sp" />
+
+                        <Spinner
+                            android:id="@+id/quizTimeSp"
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:layout_marginTop="5dp"
+                            android:background="@drawable/bg_spinner"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="34dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="答错追加"
+                            android:textColor="#7A8194"
+                            android:textSize="12sp" />
+
+                        <Spinner
+                            android:id="@+id/penaltySp"
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:layout_marginTop="5dp"
+                            android:background="@drawable/bg_spinner"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="34dp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="今日最长可玩"
+                            android:textColor="#7A8194"
+                            android:textSize="12sp" />
+
+                        <Spinner
+                            android:id="@+id/dailySp"
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:layout_marginTop="5dp"
+                            android:background="@drawable/bg_spinner"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="34dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="家长解锁密码"
+                            android:textColor="#7A8194"
+                            android:textSize="12sp" />
+
+                        <EditText
+                            android:id="@+id/pwdEt"
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:layout_marginTop="5dp"
+                            android:background="@drawable/bg_field"
+                            android:gravity="center_vertical"
+                            android:hint="默认 1234"
+                            android:inputType="textPassword"
+                            android:maxLength="8"
+                            android:paddingStart="14dp"
+                            android:paddingEnd="12dp"
+                            android:textSize="14sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ========== 第 ① 步：防清理保护（2 小步，都完成才能启动） ========== -->
+            <LinearLayout
+                android:id="@+id/adminCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_section"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="① 防清理保护"
+                        android:textColor="#1F2430"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/adminStateTv"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="未完成"
+                        android:textColor="#C0392B"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/adminDescTv"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="点一次下面这个按钮、在系统弹窗里点「激活」就好，之后永久生效。开启后「② 开始守护」才会变蓝。"
+                    android:textColor="#7A8194"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/adminBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:backgroundTint="#EDEBFF"
+                    android:text="🛡️ 一键开启防清理保护"
+                    android:textColor="#4B3BB3"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="防冻结、防清理都在后台自动处理，不用再去系统设置里点别的"
+                    android:textColor="#9AA3B5"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- ========== 第 ② 步：开始守护（灰＝未就绪，蓝＝可启动） ========== -->
+            <Button
+                android:id="@+id/startBtn"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="#C9CEDA"
+                android:text="② 开始守护"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp" />
 
             <TextView
-                android:id="@+id/autoTv"
-                android:layout_width="wrap_content"
+                android:id="@+id/startHintTv"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="📚 已自动匹配：按人教版知识点出题"
-                android:textColor="#2F6BFF"
+                android:layout_marginTop="7dp"
+                android:gravity="center"
+                android:text="点亮上面第 ① 步，这个按钮立刻变蓝"
+                android:textColor="#9AA3B5"
                 android:textSize="12sp" />
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/testBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:backgroundTint="#FFFFFF"
+                    android:text="立即试弹一题"
+                    android:textColor="#2F6BFF" />
+
+                <Button
+                    android:id="@+id/stopBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:backgroundTint="#FFFFFF"
+                    android:text="停止守护"
+                    android:textColor="#7A8194" />
+            </LinearLayout>
+
             <TextView
+                android:id="@+id/statusTv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="⚪ 未启动"
+                android:textColor="#1F2430"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/diagToggle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="多久弹一次题"
-                android:textColor="#1F2430"
-                android:textSize="15sp" />
-
-            <Spinner
-                android:id="@+id/intervalSp"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="6dp"
-                android:background="@drawable/bg_spinner"
-                android:paddingStart="14dp"
-                android:paddingEnd="40dp" />
-        </LinearLayout>
-
-        <!-- ========== 卡片二：出题与答题（常驻可见） ========== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_section"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="出题科目"
-                android:textColor="#1F2430"
-                android:textSize="15sp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:orientation="horizontal">
-
-                <CheckBox
-                    android:id="@+id/chkMath"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="🧮 数学"
-                    android:textSize="14sp" />
-
-                <CheckBox
-                    android:id="@+id/chkChinese"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="📖 语文"
-                    android:textSize="14sp" />
-
-                <CheckBox
-                    android:id="@+id/chkEnglish"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="🔤 英语"
-                    android:textSize="14sp" />
-            </LinearLayout>
-
-            <CheckBox
-                android:id="@+id/voiceChk"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="🔊 答错时语音讲解"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="🩺 弹题不正常？诊断与修复 ▾"
+                android:textColor="#B26A00"
                 android:textSize="14sp" />
 
             <LinearLayout
+                android:id="@+id/diagBox"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="答题倒计时"
-                        android:textColor="#7A8194"
-                        android:textSize="12sp" />
-
-                    <Spinner
-                        android:id="@+id/quizTimeSp"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="5dp"
-                        android:background="@drawable/bg_spinner"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="34dp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="答错追加"
-                        android:textColor="#7A8194"
-                        android:textSize="12sp" />
-
-                    <Spinner
-                        android:id="@+id/penaltySp"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="5dp"
-                        android:background="@drawable/bg_spinner"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="34dp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="今日最长可玩"
-                        android:textColor="#7A8194"
-                        android:textSize="12sp" />
-
-                    <Spinner
-                        android:id="@+id/dailySp"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="5dp"
-                        android:background="@drawable/bg_spinner"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="34dp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="家长解锁密码"
-                        android:textColor="#7A8194"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/pwdEt"
-                        android:layout_width="match_parent"
-                        android:layout_height="46dp"
-                        android:layout_marginTop="5dp"
-                        android:background="@drawable/bg_field"
-                        android:gravity="center_vertical"
-                        android:hint="默认 1234"
-                        android:inputType="textPassword"
-                        android:maxLength="8"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="12dp"
-                        android:textSize="14sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- ========== 第 ① 步：防止被一键清理（开始守护的前置条件） ========== -->
-        <LinearLayout
-            android:id="@+id/adminCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_section"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:orientation="vertical"
+                android:visibility="gone">
 
                 <TextView
-                    android:layout_width="0dp"
+                    android:id="@+id/diagTv"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="① 防止被一键清理"
-                    android:textColor="#1F2430"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="诊断中…"
+                    android:textColor="#7A8194"
+                    android:textSize="13sp" />
 
-                <TextView
-                    android:id="@+id/adminStateTv"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="未开启"
-                    android:textColor="#C0392B"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
+                <Button
+                    android:id="@+id/fixBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#FFF4E5"
+                    android:text="🔧 一键修复权限"
+                    android:textColor="#B26A00" />
+
+                <Button
+                    android:id="@+id/test10Btn"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#E6F7EE"
+                    android:text="⚡ 10 秒后弹题（快速验证）"
+                    android:textColor="#0B7A4B" />
+
+                <Button
+                    android:id="@+id/huaweiBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#FDECEC"
+                    android:text="📱 华为防冻结设置（图解）"
+                    android:textColor="#C0392B" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/adminDescTv"
+            <Space
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:lineSpacingExtra="2dp"
-                android:text="开启后，孩子上滑清理、一键清理都无法结束守护。开启后才能启动守护。"
-                android:textColor="#7A8194"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/adminBtn"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="10dp"
-                android:backgroundTint="#EDEBFF"
-                android:text="🛡️ 开启防止一键清理"
-                android:textColor="#4B3BB3"
-                android:textSize="15sp" />
+                android:layout_height="30dp" />
         </LinearLayout>
+    </ScrollView>
 
-        <!-- ========== 第 ② 步：开始守护（灰＝未就绪，蓝＝可启动） ========== -->
-        <Button
-            android:id="@+id/startBtn"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="14dp"
-            android:backgroundTint="#C9CEDA"
-            android:text="② 开始守护"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp" />
+    <!-- ========== 守护运行中：设置页锁（孩子从最近任务点开卡片也只能看到这一屏） ========== -->
+    <LinearLayout
+        android:id="@+id/lockLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#F5F6F8"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
 
         <TextView
-            android:id="@+id/startHintTv"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="7dp"
-            android:gravity="center"
-            android:text="先完成上面第 ① 步，这个按钮会变蓝，就能点"
-            android:textColor="#9AA3B5"
-            android:textSize="12sp" />
+            android:text="🛡️"
+            android:textSize="52sp" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/testBtn"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:backgroundTint="#FFFFFF"
-                android:text="立即试弹一题"
-                android:textColor="#2F6BFF" />
-
-            <Button
-                android:id="@+id/stopBtn"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="10dp"
-                android:layout_weight="1"
-                android:backgroundTint="#FFFFFF"
-                android:text="停止守护"
-                android:textColor="#7A8194" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/statusTv"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="⚪ 未启动"
+            android:text="守护运行中"
             android:textColor="#1F2430"
-            android:textSize="15sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/diagToggle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:text="🩺 弹题不正常？诊断与修复 ▾"
-            android:textColor="#B26A00"
-            android:textSize="14sp" />
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:lineSpacingExtra="3dp"
+            android:text="设置已锁定，需要家长密码才能修改"
+            android:textColor="#7A8194"
+            android:textSize="13sp" />
 
-        <LinearLayout
-            android:id="@+id/diagBox"
-            android:layout_width="match_parent"
+        <EditText
+            android:id="@+id/unlockEt"
+            android:layout_width="200dp"
+            android:layout_height="48dp"
+            android:layout_marginTop="20dp"
+            android:background="@drawable/bg_field"
+            android:gravity="center"
+            android:hint="家长密码"
+            android:inputType="numberPassword"
+            android:maxLength="8"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/unlockBtn"
+            android:layout_width="200dp"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#2F6BFF"
+            android:text="解锁设置"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/lockErrTv"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/diagTv"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:lineSpacingExtra="4dp"
-                android:text="诊断中…"
-                android:textColor="#7A8194"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/fixBtn"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="#FFF4E5"
-                android:text="🔧 一键修复权限"
-                android:textColor="#B26A00" />
-
-            <Button
-                android:id="@+id/test10Btn"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="#E6F7EE"
-                android:text="⚡ 10 秒后弹题（快速验证）"
-                android:textColor="#0B7A4B" />
-
-            <Button
-                android:id="@+id/huaweiBtn"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="#FDECEC"
-                android:text="📱 华为防冻结设置（图解）"
-                android:textColor="#C0392B" />
-        </LinearLayout>
-
-        <Space
-            android:layout_width="match_parent"
-            android:layout_height="30dp" />
+            android:layout_marginTop="10dp"
+            android:text="密码不对"
+            android:textColor="#C0392B"
+            android:textSize="12sp"
+            android:visibility="gone" />
     </LinearLayout>
-</ScrollView>
+</FrameLayout>

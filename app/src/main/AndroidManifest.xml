@@ -27,13 +27,15 @@
         android:theme="@style/Theme.AnswerLock">
 
         <!--
-            excludeFromRecents：让「答题守护」不显示在最近任务里。
-            孩子上滑看不到这张卡片，就没法靠划卡片把守护划掉。
-            家长仍可从桌面图标正常打开。
+            v2.5 起**不再** excludeFromRecents。
+            原因（实测教训）：华为「一键清理 / 上滑清理」是 force-stop，会连闹钟一起清掉，
+            进程被杀后无法自愈；而华为唯一官方豁免通道就是「在最近任务里把卡片下拉上锁」。
+            卡片被我们从最近任务里移除后，家长就没法给它上锁 → 变成「杀得掉」。
+            改为：保留卡片 + 用家长密码锁住设置页（孩子点开也只能看到锁屏），
+            引导家长下拉锁定卡片，一键清理才会跳过它。
         -->
         <activity
             android:name=".MainActivity"
-            android:excludeFromRecents="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
