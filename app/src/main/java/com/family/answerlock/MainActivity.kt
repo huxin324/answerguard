@@ -123,6 +123,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(
                 this, "已启动守护，10 秒后自动弹题——请立刻切到抖音等着", Toast.LENGTH_LONG
             ).show()
+            // 页面自动退出，孩子在上滑列表里找不到本 App，也就没法「清理」它
+            uiHandler.postDelayed({ removeFromRecents() }, 2000)
         }
     }
 
@@ -229,6 +231,27 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "提示：请点「🔧 一键修复权限」把「省电豁免」补上", Toast.LENGTH_LONG).show()
             }
         }
+
+        // 5. 最关键的一步（v2.0）：把「答题守护」从最近任务里彻底移除。
+        //    孩子在多任务列表里看不到这张卡片，就没有「上划划掉 / 一键清理」的机会；
+        //    而守护本身是服务 + 悬浮窗，不依赖这个页面，关掉页面不影响计时和弹题。
+        uiHandler.postDelayed({
+            Toast.makeText(
+                this,
+                "页面会自动关闭：孩子在上滑列表里看不到守护，也没法清理它（随时可点图标回来）",
+                Toast.LENGTH_LONG
+            ).show()
+            removeFromRecents()
+        }, 2500)
+    }
+
+    /** 把自己从「最近任务」里彻底移除 —— 这是防「上划划掉 / 一键清理」的关键 */
+    private fun removeFromRecents() {
+        try {
+            finishAndRemoveTask()
+        } catch (e: Throwable) {
+            finish()
+        }
     }
 
     /** 无障碍（华为对侧载 App 会拦截，仅作可选加分项） */
@@ -261,15 +284,15 @@ class MainActivity : AppCompatActivity() {
      */
     private fun openHuaweiStartup() {
         androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("📱 华为防冻结：这 3 步一定要做")
+            .setTitle("📱 华为防冻结：这 2 步一定要做")
             .setMessage(
                 "第 1 步：设置 → 电池 → 应用耗电管理（或「更多电池设置」）→ 答题守护 → " +
                     "选「允许后台活动 / 不受限制」\n\n" +
                     "第 2 步：设置 → 应用和服务 → 应用启动管理 → 答题守护 → " +
                     "关掉「自动管理」，弹出的「自启动 / 关联启动 / 后台活动」三项全部打开\n\n" +
-                    "第 3 步：打开最近任务（从屏幕底部上滑并停住），找到「答题守护」卡片，" +
-                    "按住往下拉，出现小锁 🔒 就说明锁定了，系统清理不掉它\n\n" +
-                    "做完这 3 步，再点「▶️ 启动守护」，然后切到抖音等它弹题。"
+                    "第 3 步：不用做了。v2.0 已把「答题守护」从最近任务里隐藏，" +
+                    "孩子上滑列表里看不到这张卡片，也就没法把它划掉或一键清理。\n\n" +
+                    "做完前 2 步，再点「▶️ 启动守护」，然后切到抖音等它弹题。"
             )
             .setPositiveButton("去启动管理") { _, _ -> jumpHuaweiStartup() }
             .setNeutralButton("去应用信息页") { _, _ -> jumpAppDetail() }
@@ -367,9 +390,27 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
-        // ④ 无障碍：华为禁止侧载应用开启，仅当已经开了才提示，不作为必需项
+        // ④ 精确闹钟：安卓 12+ 需要单独允许，否则「复活闹钟」可能被系统延后
+        if (Build.VERSION.SDK_INT >= 31) {
+            val am = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            if (!am.canScheduleExactAlarms()) {
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                            Uri.parse("package:$packageName")
+                        )
+                    )
+                    Toast.makeText(this, "④ 打开「闹钟和提醒」开关，返回后再点一次", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "④ 请到 设置→应用→答题守护→闹钟和提醒 里允许", Toast.LENGTH_LONG).show()
+                }
+                return
+            }
+        }
+        // ⑤ 无障碍：华为禁止侧载应用开启，仅当已经开了才提示，不作为必需项
         if (GuardAccessibilityService.isEnabled(this)) {
-            Toast.makeText(this, "④ 无障碍已开（额外保障）", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "⑤ 无障碍已开（额外保障）", Toast.LENGTH_SHORT).show()
         }
         updateStatus()
         Toast.makeText(
@@ -383,8 +424,8 @@ class MainActivity : AppCompatActivity() {
         val on = prefs.getBoolean("guardOn", false)
         val remain = GuardCore.remaining(this)
         statusTv.text = if (on) {
-            "v1.9 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
-        } else "v1.9 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
+            "v2.0 · 🟢 守护运行中 · 今日剩余 %d 分 %02d 秒".format(remain / 60, remain % 60)
+        } else "v2.0 · ⚪ 未启动（点上面蓝色按钮才开始计时）"
 
         // 倒计时按「时间戳账本」算，进程被冻结也不会错
         val diagTxt = prefs.getString("diag", "还没弹过") ?: "还没弹过"
@@ -398,14 +439,15 @@ class MainActivity : AppCompatActivity() {
         else "累计答题 $total · 答对 $ok · 答错 $no · 正确率 ${ok * 100 / total}%"
     }
 
-    /** 保活自检：告诉家长「进程在后台有没有被冻结过」 */
+    /** 保活自检：告诉家长「进程在后台有没有被冻结过 / 复活闹钟有没有挂上」 */
     private fun beatText(): String {
         val srv = if (QuizService.running) "✅" else "❌"
         val keep = if (QuizService.keepAlive) "✅" else "❌"
+        val alarm = if (QuizService.alarmMode.isBlank()) "—" else QuizService.alarmMode
         val maxGap = prefs.getLong("maxGapSec", 0L)
         val gap = if (maxGap < 8) "后台连续运行 ✅"
-        else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结」3 步）"
-        return "服务 $srv 静音保活 $keep · $gap"
+        else "后台最长中断 ${maxGap} 秒 ⚠️（做「华为防冻结」2 步）"
+        return "服务 $srv 静音保活 $keep 复活闹钟 $alarm · $gap"
     }
 
     /** 权限自检：哪一项是 ❌，就去系统里把那一项打开 */
@@ -417,6 +459,9 @@ class MainActivity : AppCompatActivity() {
         ) "✅" else "❌"
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val battery = if (pm.isIgnoringBatteryOptimizations(packageName)) "✅" else "❌"
-        return "自检 弹窗 $overlay 通知 $notif 省电 $battery"
+        val exact = if (Build.VERSION.SDK_INT < 31 ||
+            (getSystemService(ALARM_SERVICE) as android.app.AlarmManager).canScheduleExactAlarms()
+        ) "✅" else "❌"
+        return "自检 弹窗 $overlay 通知 $notif 省电 $battery 闹钟 $exact"
     }
 }

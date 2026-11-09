@@ -126,11 +126,11 @@ object GuardCore {
 
         if (!p.getBoolean("guardOn", false)) return
 
-        // 自愈：有题没答完，但窗口已经不在了（孩子上滑划掉任务 / 系统移除窗口 / 进程被重建）
-        // → 每 2 秒重新弹一次，删进程 ≠ 逃脱，必须答对才能离开。
+        // 自愈：有题没答完，但窗口已经不在了（孩子划掉任务 / 系统移除窗口 / 进程被重建）
+        // → 每 1 秒重新弹一次，删进程 ≠ 逃脱，必须答对才能离开。
         if (p.getBoolean("overlayOpen", false) && !OverlayQuiz.isShowing) {
             val t = now / 1000L
-            if (t - lastReshowSec >= 2L) {
+            if (t - lastReshowSec >= 1L) {
                 lastReshowSec = t
                 OverlayQuiz.get(c).resumePending()
             }

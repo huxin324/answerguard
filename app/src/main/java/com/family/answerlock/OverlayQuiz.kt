@@ -185,6 +185,19 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         // 尽量屏蔽「上滑回桌面/最近任务」手势（系统只允许排除边缘 200dp 内的区域，尽力而为）
         blockSystemGestures(v)
 
+        // 窗口被系统以外的方式移除时（部分机型在切换最近任务时会这样），
+        // 立刻把「显示中」标记清掉，让 GuardCore 的心跳在 1 秒内把题目重新画出来。
+        v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {}
+
+            override fun onViewDetachedFromWindow(view: View) {
+                if (isShowing) {
+                    isShowing = false
+                    GuardCore.diag(ctx, "答题窗被系统移除 → 1 秒内自动重弹")
+                }
+            }
+        })
+
         isShowing = true
         // 落盘「有一题没答完」：进程被杀 / 窗口被系统移除后，服务会立刻把它重新弹出来
         prefs.edit()
@@ -237,11 +250,12 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         try { tts?.stop() } catch (e: Exception) {}
 
         val was = isShowing
+        // 先清标记：这样 removeView 触发的「窗口被移除」回调不会误报成「被系统移除」
+        isShowing = false
         root?.let {
             try { wm.removeView(it) } catch (e: Exception) { /* 已移除 */ }
         }
         root = null
-        isShowing = false
         // 正常关闭 = 这一题结束了，清除「没答完」标记（否则 watchdog 会把它又弹出来）
         prefs.edit().putBoolean("overlayOpen", false).putString("overlayMode", "").apply()
         if (was) onClosed?.invoke()

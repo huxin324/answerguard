@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 
 /**
@@ -41,6 +42,12 @@ class QuizService : Service() {
         override fun run() {
             try {
                 GuardCore.tick(this@QuizService)
+                // 每次心跳都把「复活闹钟」往后推 6 秒：只要进程活着，系统里就永远有一个
+                // 6 秒后的闹钟等着接手；进程一旦被杀，这个闹钟就会把我们重新叫起来。
+                // 只在「守护已开启 + 亮屏」时挂这个短闹钟（息屏本来就不计时，避免整夜反复唤醒耗电）
+                if (prefs.getBoolean("guardOn", false) &&
+                    (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
+                ) armRevive()
             } catch (e: Throwable) {
                 GuardCore.diag(this@QuizService, "心跳异常：${e.javaClass.simpleName}")
             }
@@ -82,8 +89,12 @@ class QuizService : Service() {
 
         // 进程刚被重建（孩子划掉任务 / 系统杀进程后重启）：有一题没答完就立刻弹回来
         if (prefs.getBoolean("overlayOpen", false)) {
+            GuardCore.diag(this, "检测到进程被重建 → 立刻把没答完的题弹回来")
             h.postDelayed({ OverlayQuiz.get(this@QuizService).resumePending() }, 600)
         }
+
+        // 服务一启动就把两条闹钟都排上（复活链条 + 下次弹题）
+        scheduleSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -91,6 +102,12 @@ class QuizService : Service() {
             ACTION_TEST -> {
                 OverlayQuiz.get(this).warmup()
                 OverlayQuiz.get(this).showQuiz()
+            }
+            ACTION_REVIVE -> {
+                // 系统闹钟把我们从「死亡」里叫醒：结算时间、重排链条。
+                // 有题没答完的重新弹窗在 onCreate 里已经做过了。
+                GuardCore.tick(this)
+                scheduleSelf()
             }
             ACTION_TICK -> {
                 GuardCore.tick(this)
@@ -101,9 +118,15 @@ class QuizService : Service() {
                 scheduleSelf()
             }
             else -> {
-                // 无 action ＝ 家长点「启动守护」：重置为全新一天
-                GuardCore.bootstrap(this)
-                scheduleSelf()
+                // 家长点「启动守护」
+                // 已经在守护中 → 只更新配置，不重置今天的时间（避免家长改一下设置就把时间清零）
+                if (prefs.getBoolean("guardOn", false)) {
+                    scheduleSelf()
+                    GuardCore.diag(this, "配置已更新（守护继续，时间不重置）")
+                } else {
+                    GuardCore.bootstrap(this)
+                    scheduleSelf()
+                }
             }
         }
         return START_STICKY
@@ -154,79 +177,72 @@ class QuizService : Service() {
         keepAlive = false
     }
 
-    /* ================= ③ 闹钟兜底 ================= */
+    /* ================= ③ 闹钟：自愈链条（进程被杀也能自己回来） ================= */
+
+    /**
+     * 复活闹钟：把「6 秒后叫醒自己」的闹钟一直挂在系统里，每次心跳都重排一次。
+     *
+     * 为什么必须这样设计（v1.9 之前的最大漏洞）：
+     * 孩子上划 / 一键清理会把整个进程杀掉，杀完内存里的每秒心跳就没了。
+     * 而 v1.9 只在「该弹题的时刻」排一个闹钟，题一弹出闹钟就被消耗掉了 ——
+     * 之后系统里再没有任何东西会唤醒我们，进程一死就是永久死亡，这就是你视频里看到的现象。
+     *
+     * 现在系统里永远挂着 6 秒后的闹钟（闹钟由系统保管，不依赖 App 是否活着）：
+     * 进程被杀 → 6 秒内系统把我们拉起来 → 服务一启动发现「有一题没答完」→ 立刻重新画出来。
+     */
+    private fun armRevive() {
+        arm(REVIVE_SEC, ACTION_REVIVE, REQ_REVIVE)
+    }
 
     private fun scheduleSelf() {
         if (!prefs.getBoolean("guardOn", false)) return
-        val interval = prefs.getInt("intervalSec", 60)
-        val remaining = prefs.getInt("remaining", 0)
-        scheduleNext(minOf(interval, maxOf(remaining, 5)))
+        armRevive()
+        val interval = prefs.getInt("intervalSec", 60).coerceAtLeast(5)
+        val remain = prefs.getInt("remaining", 0)
+        arm(minOf(interval, maxOf(remain, 5)).toLong(), ACTION_TICK, REQ_TICK)
     }
 
-    private fun scheduleNext(delaySec: Int) {
-        val pi = tickPendingIntent()
+    /**
+     * 统一排闹钟：① 精确闹钟（不占状态栏）→ ② 闹钟类闹钟（最不容易被系统压）→ ③ 宽松闹钟。
+     * 安卓 12+ 精确闹钟需要单独授权，没授权就自动退到闹钟类闹钟，不会因此不工作。
+     */
+    private fun arm(delaySec: Long, action: String, reqCode: Int) {
         val am = getSystemService(ALARM_SERVICE) as AlarmManager
+        val pi = alarmPi(this, action, reqCode)
+        val elapsed = SystemClock.elapsedRealtime() + delaySec * 1000L
         val wall = System.currentTimeMillis() + delaySec * 1000L
 
-        // ① 闹钟类闹钟：系统几乎必定投递（状态栏会显示闹钟图标，这是「守护在跑」的凭证）
+        try {
+            if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsed, pi)
+                alarmMode = "精确闹钟"
+                return
+            }
+        } catch (e: Exception) { /* 退到下一种 */ }
+
         try {
             am.setAlarmClock(AlarmManager.AlarmClockInfo(wall, null), pi)
             alarmMode = "闹钟"
             return
-        } catch (e: Exception) { /* 退到精确闹钟 */ }
+        } catch (e: Exception) { /* 退到下一种 */ }
 
         try {
-            am.setExactAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delaySec * 1000L, pi
-            )
-            alarmMode = "精确闹钟"
-        } catch (e: Exception) {
-            try {
-                am.setAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + delaySec * 1000L, pi
-                )
-                alarmMode = "宽松闹钟"
-            } catch (e2: Exception) {
-                alarmMode = "闹钟失败"
-            }
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsed, pi)
+            alarmMode = "宽松闹钟"
+        } catch (e2: Exception) {
+            alarmMode = "闹钟失败"
         }
     }
 
-    private fun tickPendingIntent(): PendingIntent {
-        val intent = Intent(this, QuizService::class.java).setAction(ACTION_TICK)
-        return if (Build.VERSION.SDK_INT >= 26)
-            PendingIntent.getForegroundService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        else
-            PendingIntent.getService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-    }
-
-    /** 孩子上划划掉任务后：立刻重启服务 + 把没答完的题弹回来（划掉 ≠ 逃脱） */
+    /** 任务被划掉：立刻拉起自己，并补一个 1 秒后的闹钟（万一随后被系统杀） */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (prefs.getBoolean("guardOn", false)) {
-            // ① 立刻拉起（本进程还活着时这一步就能成功，衔接最快）
             try {
                 startForegroundService(
-                    Intent(this, QuizService::class.java).setAction(ACTION_RESUME)
+                    Intent(this, QuizService::class.java).setAction(ACTION_REVIVE)
                 )
             } catch (e: Exception) { /* 后台受限，靠下面的闹钟 */ }
-            // ② 闹钟兜底：万一进程随后被系统杀，1 秒后也要把服务唤醒
-            try {
-                val pi = PendingIntent.getBroadcast(
-                    this, 0, Intent(this, RestartReceiver::class.java),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                )
-                (getSystemService(ALARM_SERVICE) as AlarmManager).setAlarmClock(
-                    AlarmManager.AlarmClockInfo(System.currentTimeMillis() + 1200, null), pi
-                )
-            } catch (e: Exception) { /* ignore */ }
+            arm(1L, ACTION_REVIVE, REQ_REVIVE)
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -245,8 +261,14 @@ class QuizService : Service() {
         const val CHANNEL_ID = "guard"
         const val ACTION_TEST = "com.family.answerlock.TEST"
         const val ACTION_TICK = "com.family.answerlock.TICK"
+        const val ACTION_REVIVE = "com.family.answerlock.REVIVE"
         const val ACTION_START = "com.family.answerlock.START"
         const val ACTION_RESUME = "com.family.answerlock.RESUME"
+
+        /** 复活闹钟提前量（秒）：进程被杀后，最多这么久就会被系统叫醒 */
+        private const val REVIVE_SEC = 6L
+        private const val REQ_TICK = 2001
+        private const val REQ_REVIVE = 2002
 
         /** 兼容旧代码的字段 */
         @Volatile var quizOpen = false
@@ -259,6 +281,21 @@ class QuizService : Service() {
 
         /** 当前用的是哪种闹钟（诊断显示） */
         @Volatile var alarmMode = ""
+
+        /** 统一的闹钟 PendingIntent（后台受限时用 getForegroundService 才能拉起服务） */
+        private fun alarmPi(c: Context, action: String, reqCode: Int): PendingIntent {
+            val intent = Intent(c, QuizService::class.java).setAction(action)
+            return if (Build.VERSION.SDK_INT >= 26)
+                PendingIntent.getForegroundService(
+                    c, reqCode, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            else
+                PendingIntent.getService(
+                    c, reqCode, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+        }
 
         fun start(context: Context) {
             context.startForegroundService(
@@ -281,19 +318,10 @@ class QuizService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, QuizService::class.java).setAction(ACTION_TICK)
-            val pi = if (Build.VERSION.SDK_INT >= 26)
-                PendingIntent.getForegroundService(
-                    context, 2001, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            else
-                PendingIntent.getService(
-                    context, 2001, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
             try {
-                (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pi)
+                val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                am.cancel(alarmPi(context, ACTION_TICK, REQ_TICK))
+                am.cancel(alarmPi(context, ACTION_REVIVE, REQ_REVIVE))
             } catch (e: Exception) { /* ignore */ }
             GuardCore.prefs(context).edit()
                 .putBoolean("guardOn", false).putBoolean("locked", false).apply()
