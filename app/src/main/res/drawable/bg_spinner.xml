@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Spinner 专用背景：自绘边框（shape） + 右侧下拉箭头。
+    注意：Spinner 的默认箭头是画在 background 里的，所以换成自定义背景时必须自己补一个箭头，
+    否则会变成一根没有任何边框的「裸文字」——v2.2 就是这个样子。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#FFFFFF" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="1.5dp"
+                android:color="#DCE3F0" />
+        </shape>
+    </item>
+    <item
+        android:width="14dp"
+        android:height="14dp"
+        android:right="14dp"
+        android:gravity="end|center_vertical"
+        android:drawable="@drawable/ic_chevron_down" />
+</layer-list>

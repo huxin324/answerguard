@@ -87,10 +87,12 @@ class QuizService : Service() {
             it.warmup()
         }
 
-        // 进程刚被重建（孩子划掉任务 / 系统杀进程后重启）：有一题没答完就立刻弹回来
+        // 进程刚被重建（孩子划掉任务 / 一键清理 / 系统杀进程后重启）：
+        // ① 记一次「逃逸」并追加惩罚题（杀进程换不来便宜）
+        // ② 立刻把没答完的那道题重新画出来（300ms 内，不等闹钟）
         if (prefs.getBoolean("overlayOpen", false)) {
-            GuardCore.diag(this, "检测到进程被重建 → 立刻把没答完的题弹回来")
-            h.postDelayed({ OverlayQuiz.get(this@QuizService).resumePending() }, 600)
+            GuardCore.onEscape(this)
+            h.postDelayed({ OverlayQuiz.get(this@QuizService).resumePending() }, 300)
         }
 
         // 服务一启动就把两条闹钟都排上（复活链条 + 下次弹题）
@@ -180,18 +182,32 @@ class QuizService : Service() {
     /* ================= ③ 闹钟：自愈链条（进程被杀也能自己回来） ================= */
 
     /**
-     * 复活闹钟：把「6 秒后叫醒自己」的闹钟一直挂在系统里，每次心跳都重排一次。
+     * 复活闹钟：把「几秒后叫醒自己」的闹钟一直挂在系统里，每次心跳都重排一次。
      *
      * 为什么必须这样设计（v1.9 之前的最大漏洞）：
      * 孩子上划 / 一键清理会把整个进程杀掉，杀完内存里的每秒心跳就没了。
      * 而 v1.9 只在「该弹题的时刻」排一个闹钟，题一弹出闹钟就被消耗掉了 ——
      * 之后系统里再没有任何东西会唤醒我们，进程一死就是永久死亡，这就是你视频里看到的现象。
      *
-     * 现在系统里永远挂着 6 秒后的闹钟（闹钟由系统保管，不依赖 App 是否活着）：
-     * 进程被杀 → 6 秒内系统把我们拉起来 → 服务一启动发现「有一题没答完」→ 立刻重新画出来。
+     * 现在同时挂两条（互不覆盖，因为 PendingIntent 的 requestCode 不同）：
+     *  - setAlarmClock 5 秒：华为实测最不容易被压，进程一死就能把我们拉起来
+     *  - setAndAllowWhileIdle 9 秒：万一闹钟类被系统丢弃，还有一条宽松闹钟兜底
      */
     private fun armRevive() {
         arm(REVIVE_SEC, ACTION_REVIVE, REQ_REVIVE)
+        armBackup(REVIVE_SEC + 4L)
+    }
+
+    /** 第二重闹钟：宽松闹钟（不占状态栏，Doze 下最晚 9 分钟内也可能被提前，够用了） */
+    private fun armBackup(delaySec: Long) {
+        try {
+            val am = getSystemService(ALARM_SERVICE) as AlarmManager
+            am.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + delaySec * 1000L,
+                alarmPi(this, ACTION_REVIVE, REQ_REVIVE_BACKUP)
+            )
+        } catch (e: Exception) { /* 拿不到就算了，主闹钟还在 */ }
     }
 
     private fun scheduleSelf() {
@@ -239,14 +255,18 @@ class QuizService : Service() {
         }
     }
 
-    /** 任务被划掉：立刻拉起自己，并补一个 1 秒后的闹钟（万一随后被系统杀） */
+    /** 任务被划掉：立刻把题画回来 + 拉起自己 + 补一条 1 秒闹钟（万一随后被系统杀） */
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (prefs.getBoolean("guardOn", false)) {
+            // ① 进程还活着：立刻重弹（窗口被系统藏起来时，重画一遍比等闹钟快得多）
+            try { OverlayQuiz.get(this).resumePending() } catch (e: Exception) { /* ignore */ }
+            // ② 拉起自己
             try {
                 startForegroundService(
                     Intent(this, QuizService::class.java).setAction(ACTION_REVIVE)
                 )
             } catch (e: Exception) { /* 后台受限，靠下面的闹钟 */ }
+            // ③ 闹钟兜底
             arm(1L, ACTION_REVIVE, REQ_REVIVE)
         }
         super.onTaskRemoved(rootIntent)
@@ -271,9 +291,10 @@ class QuizService : Service() {
         const val ACTION_RESUME = "com.family.answerlock.RESUME"
 
         /** 复活闹钟提前量（秒）：进程被杀后，最多这么久就会被系统叫醒 */
-        private const val REVIVE_SEC = 6L
+        private const val REVIVE_SEC = 5L
         private const val REQ_TICK = 2001
         private const val REQ_REVIVE = 2002
+        private const val REQ_REVIVE_BACKUP = 2003
 
         /** 兼容旧代码的字段 */
         @Volatile var quizOpen = false
@@ -327,6 +348,7 @@ class QuizService : Service() {
                 val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 am.cancel(alarmPi(context, ACTION_TICK, REQ_TICK))
                 am.cancel(alarmPi(context, ACTION_REVIVE, REQ_REVIVE))
+                am.cancel(alarmPi(context, ACTION_REVIVE, REQ_REVIVE_BACKUP))
             } catch (e: Exception) { /* ignore */ }
             GuardCore.prefs(context).edit()
                 .putBoolean("guardOn", false).putBoolean("locked", false).apply()

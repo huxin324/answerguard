@@ -178,9 +178,29 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             wm.addView(v, lp)
         } catch (e: Exception) {
             root = null
-            GuardCore.diag(ctx, "失败：${e.javaClass.simpleName} ${e.message}")
+            // 华为把「悬浮窗」拆成了「悬浮窗」+「后台弹窗」两个开关：
+            // 只开前者时，前台能弹、离开本应用就被系统拦住（BadTokenException / permission denied）。
+            // 这里把结果落盘，家长页顶部的红条就会亮起来，直接带他去开第二个开关。
+            val blocked = e is WindowManager.BadTokenException ||
+                (e.message ?: "").contains("permission", true) ||
+                (e.message ?: "").contains("denied", true)
+            if (blocked) {
+                prefs.edit()
+                    .putBoolean("bgPopupBlocked", true)
+                    .putBoolean("bgPopupOk", false)
+                    .apply()
+                GuardCore.diag(ctx, "弹窗被系统拦住 → 华为「后台弹窗」权限没开")
+            } else {
+                GuardCore.diag(ctx, "弹窗失败：${e.javaClass.simpleName} ${e.message}")
+            }
             return
         }
+
+        // 能加进 WindowManager ＝ 两个开关都齐了，顶部红条可以收起
+        prefs.edit()
+            .putBoolean("bgPopupOk", true)
+            .putBoolean("bgPopupBlocked", false)
+            .apply()
 
         // 尽量屏蔽「上滑回桌面/最近任务」手势（系统只允许排除边缘 200dp 内的区域，尽力而为）
         blockSystemGestures(v)
@@ -213,24 +233,33 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         } else nextQuestion()
     }
 
-    /** 上滑手势区域排除：能挡住一部分机型的手势导航（不保证全部，兜底靠自动重弹） */
+    /**
+     * 屏蔽「上滑回桌面 / 上滑进最近任务」手势。
+     *
+     * 安卓 10（API 29）对排除区域有 200dp 上限，只能挡屏幕四边；
+     * 安卓 11（API 30）起取消了这个上限，直接把整块窗口排除掉，
+     * 手势就从窗口上"滑不动"了（华为 Mate 60 属于这一档）。
+     */
     private fun blockSystemGestures(v: View) {
         if (Build.VERSION.SDK_INT < 29) return
         v.post(object : Runnable {
             override fun run() {
                 try {
-                    val d = ctx.resources.displayMetrics.density
-                    val h = v.height
                     val w = v.width
-                    if (h > 0 && w > 0) {
-                        val edge = (200 * d).toInt()
-                        val rects = ArrayList<Rect>(4)
+                    val h = v.height
+                    if (w <= 0 || h <= 0) return
+                    val rects = ArrayList<Rect>(4)
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        // 整屏排除：底部上滑、侧边返回全都落在窗口内，不算系统手势
+                        rects.add(Rect(0, 0, w, h))
+                    } else {
+                        val edge = (200 * ctx.resources.displayMetrics.density).toInt()
                         rects.add(Rect(0, 0, w, minOf(edge, h)))
                         rects.add(Rect(0, maxOf(h - edge, 0), w, h))
                         rects.add(Rect(0, 0, minOf(edge, w), h))
                         rects.add(Rect(maxOf(w - edge, 0), 0, w, h))
-                        v.setSystemGestureExclusionRects(rects)
                     }
+                    v.setSystemGestureExclusionRects(rects)
                 } catch (e: Exception) { /* 某些系统不支持，忽略 */ }
             }
         })

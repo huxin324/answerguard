@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    设备管理器策略：这里故意留空。
+    我们只需要「激活」这个动作本身带来的保护（系统不允许强行停止 / 一键清理会跳过），
+    不需要锁屏、清数据、改密码这些危险能力。
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies />
+</device-admin>

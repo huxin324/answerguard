@@ -22,10 +22,44 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="14dp"
             android:text="孩子玩到点自动弹题 · 答对继续玩 · 答错加题"
             android:textColor="#7A8194"
             android:textSize="13sp" />
+
+        <!-- 华为「后台弹窗」缺口提示：只有检测到弹不出来时才出现，点一下直达开关页 -->
+        <LinearLayout
+            android:id="@+id/hintCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/bg_hint"
+            android:clickable="true"
+            android:focusable="true"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/hintTv"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:lineSpacingExtra="2dp"
+                android:text="⚠️ 华为还需打开「后台弹窗」权限，否则离开本页后弹不出来"
+                android:textColor="#C0392B"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="8dp"
+                android:text="去打开 ›"
+                android:textColor="#C0392B"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <!-- ========== 卡片一：年级与频率 ========== -->
         <LinearLayout
@@ -45,13 +79,17 @@
             <Spinner
                 android:id="@+id/gradeSp"
                 android:layout_width="match_parent"
-                android:layout_height="44dp" />
+                android:layout_height="48dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner"
+                android:paddingStart="14dp"
+                android:paddingEnd="40dp" />
 
             <TextView
                 android:id="@+id/autoTv"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="6dp"
                 android:text="📚 已自动匹配：按人教版知识点出题"
                 android:textColor="#2F6BFF"
                 android:textSize="12sp" />
@@ -59,7 +97,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="14dp"
                 android:text="多久弹一次题"
                 android:textColor="#1F2430"
                 android:textSize="15sp" />
@@ -67,7 +105,11 @@
             <Spinner
                 android:id="@+id/intervalSp"
                 android:layout_width="match_parent"
-                android:layout_height="44dp" />
+                android:layout_height="48dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner"
+                android:paddingStart="14dp"
+                android:paddingEnd="40dp" />
         </LinearLayout>
 
         <!-- ========== 卡片二：出题与答题（常驻可见） ========== -->
@@ -89,6 +131,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
                 android:orientation="horizontal">
 
                 <CheckBox
@@ -127,7 +170,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="8dp"
                 android:orientation="horizontal">
 
                 <LinearLayout
@@ -147,7 +190,11 @@
                     <Spinner
                         android:id="@+id/quizTimeSp"
                         android:layout_width="match_parent"
-                        android:layout_height="42dp" />
+                        android:layout_height="46dp"
+                        android:layout_marginTop="5dp"
+                        android:background="@drawable/bg_spinner"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="34dp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -167,14 +214,18 @@
                     <Spinner
                         android:id="@+id/penaltySp"
                         android:layout_width="match_parent"
-                        android:layout_height="42dp" />
+                        android:layout_height="46dp"
+                        android:layout_marginTop="5dp"
+                        android:background="@drawable/bg_spinner"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="34dp" />
                 </LinearLayout>
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="10dp"
                 android:orientation="horizontal">
 
                 <LinearLayout
@@ -194,7 +245,11 @@
                     <Spinner
                         android:id="@+id/dailySp"
                         android:layout_width="match_parent"
-                        android:layout_height="42dp" />
+                        android:layout_height="46dp"
+                        android:layout_marginTop="5dp"
+                        android:background="@drawable/bg_spinner"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="34dp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -214,25 +269,96 @@
                     <EditText
                         android:id="@+id/pwdEt"
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="5dp"
+                        android:background="@drawable/bg_field"
+                        android:gravity="center_vertical"
                         android:hint="默认 1234"
                         android:inputType="textPassword"
                         android:maxLength="8"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="12dp"
                         android:textSize="14sp" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ========== 启动区 ========== -->
+        <!-- ========== 第 ① 步：防止被一键清理（开始守护的前置条件） ========== -->
+        <LinearLayout
+            android:id="@+id/adminCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_section"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="① 防止被一键清理"
+                    android:textColor="#1F2430"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/adminStateTv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="未开启"
+                    android:textColor="#C0392B"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/adminDescTv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:lineSpacingExtra="2dp"
+                android:text="开启后，孩子上滑清理、一键清理都无法结束守护。开启后才能启动守护。"
+                android:textColor="#7A8194"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/adminBtn"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="#EDEBFF"
+                android:text="🛡️ 开启防止一键清理"
+                android:textColor="#4B3BB3"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <!-- ========== 第 ② 步：开始守护（灰＝未就绪，蓝＝可启动） ========== -->
         <Button
             android:id="@+id/startBtn"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_marginTop="18dp"
-            android:backgroundTint="#2F6BFF"
-            android:text="开始守护"
+            android:layout_marginTop="14dp"
+            android:backgroundTint="#C9CEDA"
+            android:text="② 开始守护"
             android:textColor="#FFFFFF"
             android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/startHintTv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:gravity="center"
+            android:text="先完成上面第 ① 步，这个按钮会变蓝，就能点"
+            android:textColor="#9AA3B5"
+            android:textSize="12sp" />
 
         <LinearLayout
             android:layout_width="match_parent"

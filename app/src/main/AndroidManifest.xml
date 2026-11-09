@@ -69,6 +69,22 @@
             android:name=".RestartReceiver"
             android:exported="false" />
 
+        <!--
+            设备管理器：激活后系统不允许「强行停止」本应用，上滑清理 / 一键清理都会跳过它。
+            这是「上划就能结束进程」的唯一系统级解法（需要家长授权一次）。
+        -->
+        <receiver
+            android:name=".GuardAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

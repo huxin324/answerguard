@@ -102,8 +102,23 @@ object GuardCore {
         diag(c, "守护恢复（补扣 $gone 秒）")
     }
 
-    /* ================= 心跳 ================= */
+    /**
+     * 「题没答完，但进程是重新启动的」= 刚刚被强行结束过一次（上滑清理 / 一键清理 / 强杀）。
+     *
+     * 代码无法阻止华为的一键清理杀掉进程，但可以让"杀掉"变成亏本买卖：
+     * 记一次逃逸，并把答错追加的题数（默认 2 题）压进 pending ——
+     * 重新弹出来的那道题答对之后，还得再答这几道，等于白折腾还倒赔。
+     */
+    fun onEscape(c: Context) {
+        val p = prefs(c)
+        val esc = p.getInt("escapes", 0) + 1
+        val pen = p.getInt("penalty", 2).coerceIn(1, 3)
+        val pending = p.getInt("pending", 0) + pen
+        p.edit().putInt("escapes", esc).putInt("pending", pending).apply()
+        diag(c, "检测到被强行结束（第 $esc 次）→ 追加 $pen 题")
+    }
 
+    /* ================= 心跳 ================= */
     /**
      * 心跳。无障碍服务每秒调一次；AlarmManager 闹钟到点也调一次。
      * 只有「亮屏 + 没在答题」的时间才会被计入使用时长。
