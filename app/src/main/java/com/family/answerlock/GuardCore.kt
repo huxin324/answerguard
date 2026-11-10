@@ -254,7 +254,8 @@ object GuardCore {
 
         // 自愈：有题没答完，但窗口已经不在了（孩子划掉任务 / 系统移除窗口 / 进程被重建）
         // → 每 1 秒重新弹一次，删进程 ≠ 逃脱，必须答对才能离开。
-        if (p.getBoolean("overlayOpen", false) && !OverlayQuiz.isShowing) {
+        // v3.4：息屏时不重弹 —— 否则重弹的题会在锁屏后面悄悄倒计时、超时加题。
+        if (p.getBoolean("overlayOpen", false) && !OverlayQuiz.isShowing && isScreenOn(c)) {
             val t = now / 1000L
             if (t - lastReshowSec >= 1L) {
                 lastReshowSec = t

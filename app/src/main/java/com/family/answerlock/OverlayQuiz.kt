@@ -1,6 +1,7 @@
 package com.family.answerlock
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.media.AudioAttributes
@@ -100,6 +101,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     private var ttsInfo = "未初始化"
     /** 点了「测试语音」但引擎还在初始化 → 就绪后立刻朗读 */
     private var testPending = false
+    /** 引擎探测已经出结论（就绪 / 全部没中文包），不会再有异步回调了 */
+    private var ttsSettled = false
     private var soundPool: SoundPool? = null
     private var sndOk = 0
     private var sndNo = 0
@@ -110,6 +113,10 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     /** 下一次 show 时是否接着上次那道题（被划掉/被杀后重弹用） */
     private var resumeNext = false
     private var answerTimer: CountDownTimer? = null
+    /** v3.4 息屏冻结：true = 题目流程被冻住，亮屏后由 onScreenOn 接上 */
+    private var screenPaused = false
+    /** 息屏那一刻是「正在看讲解/等跳下一题」还是「正在作答」 */
+    private var screenWasExplain = false
     private var lastExplain = ""
     private var speakRunnable: Runnable? = null
     private val nextRunnable = Runnable { nextQuestion() }
@@ -196,12 +203,21 @@ class OverlayQuiz private constructor(private val ctx: Context) {
 
         replayBtn?.setOnClickListener {
             if (!ttsReady) {
-                // 直接告诉孩子/家长为什么没声音，而不是点了没反应
-                Toast.makeText(
-                    ctx,
-                    "这台手机没有可用的中文语音包，语音讲解读不出来（讲解看下面的文字即可）",
-                    Toast.LENGTH_LONG
-                ).show()
+                // v3.3：再试一次（可能是刚装好语音包，或需要重新探测别的引擎）
+                initTts()
+                if (ttsReady) {
+                    speak(lastExplain)
+                } else if (ttsSettled) {
+                    // 探测过了还是不行 → 直接带去装语音包
+                    openVoiceSettings()
+                } else {
+                    testPending = true
+                    Toast.makeText(
+                        ctx,
+                        "正在找能说中文的语音引擎…找到后会自动朗读",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
                 return@setOnClickListener
             }
             speak(lastExplain)
@@ -346,6 +362,49 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             ui.postDelayed(nextRunnable, 3000)
         } else if (cur != null) {
             startTimer(emgLeftSec.coerceAtLeast(5))
+        }
+    }
+
+    /* ================= 息屏冻结（v3.4：锁屏不计时、不超时、不加题） ================= */
+
+    /**
+     * 息屏/锁屏：把弹题窗里的一切冻住。
+     * · 正在作答 → 倒计时停住（精确秒数落盘），不会走到 timeUp() 加题；
+     * · 正在看讲解 → 暂停「自动跳下一题」，语音读没读完都不再推进；
+     * · 亮屏后由 onScreenOn() 从停住的地方原样接上。
+     * 这样「锁屏休息」和「锁屏逃逸」是同一件事：题没消失，但也不会被偷偷超时。
+     */
+    fun onScreenOff() {
+        ui.post {
+            if (!isShowing || emgOpen) return@post
+            val answered = !feedbackTv?.text.isNullOrBlank()
+            ui.removeCallbacks(nextRunnable)
+            speakRunnable?.let { ui.removeCallbacks(it) }
+            speakRunnable = null
+            screenPaused = true
+            screenWasExplain = answered
+            if (!answered && cur != null) {
+                answerTimer?.cancel()
+                answerTimer = null
+                // 精确落盘当前剩余秒数（平时只在整 5 秒时落盘）
+                prefs.edit().putInt("qLeftSec", leftSec.coerceAtLeast(5)).apply()
+            }
+        }
+    }
+
+    /** 亮屏：从冻住的地方接上（作答→倒计时继续；讲解→马上安排跳下一题） */
+    fun onScreenOn() {
+        ui.post {
+            if (!screenPaused) return@post
+            screenPaused = false
+            if (!isShowing || emgOpen) return@post
+            val answered = !feedbackTv?.text.isNullOrBlank()
+            if (answered || screenWasExplain) {
+                // 讲解还在屏幕上 → 稍等片刻跳下一题（让亮屏的一瞬先看清画面）
+                ui.postDelayed(nextRunnable, 1500)
+            } else if (cur != null) {
+                startTimer(prefs.getInt("qLeftSec", prefs.getInt("quizTimeSec", 60)).coerceAtLeast(5))
+            }
         }
     }
 
@@ -577,6 +636,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
 
     private fun onSpeakFinished() {
         ui.removeCallbacks(nextRunnable)
+        // 息屏冻结中（或家长密码面板开着）：别自动跳题，亮屏/关面板后由对应入口接上
+        if (screenPaused || emgOpen) return
         ui.postDelayed(nextRunnable, 600)
     }
 
@@ -636,18 +697,25 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     /**
      * 初始化语音引擎。
      *
-     * v3.2 修的「语音讲解一直没声音」：
-     * ① AndroidManifest 缺 `<queries><intent action=TTS_SERVICE>`：安卓 11 起有「软件包可见性」
-     *    限制，不加这段 App 根本看不到系统里的语音引擎，TextToSpeech 初始化直接失败且不弹错。
-     * ② 没显式指定音频通道：个别 ROM（华为/OPPO）会把 TTS 丢到被静音的通道上，
-     *    表现就是「不报错、也没声音」。这里改成媒体通道 + 语音内容。
-     * ③ 原来初始化失败一次就永久放弃，现在失败会重试，并把原因写到诊断里。
+     * v3.2 修的「语音讲解一直没声音」：manifest 缺 `<queries><intent action=TTS_SERVICE>`，
+     * 安卓 11 起 App 看不到语音引擎，TextToSpeech 初始化静默失败。
+     *
+     * v3.3 修的「提示没有中文语音包」：queries 生效后能找到引擎了，但手机里常装了
+     * 好几个引擎（谷歌 TTS / 华为引擎 / 讯飞…），**系统默认选中的那个不一定带中文语音数据**。
+     * 现在的流程：先用默认引擎试中文 → 不行就按优先级逐个探测系统里其他引擎
+     * （华为引擎 → 讯飞 → 百度 → 其他 → 谷歌），谁有中文就用谁，并永久记住这个选择；
+     * 全都没有中文包 → 自动打开系统的语音设置页，让家长装一次语音数据（这一步没有 API 可替代）。
      */
     private fun initTts() {
-        if (tts != null || ttsInitTried) return
+        if (tts != null || probing) return
         ttsInitTried = true
+        ttsSettled = false
+        val saved = prefs.getString("ttsEngine", "")
         try {
-            tts = TextToSpeech(ctx) { status -> onTtsInit(status) }
+            tts = if (!saved.isNullOrBlank())
+                TextToSpeech(ctx, { s -> onTtsInit(s) }, saved)
+            else
+                TextToSpeech(ctx) { s -> onTtsInit(s) }
         } catch (e: Throwable) {
             ttsReady = false
             ttsInitTried = false
@@ -656,16 +724,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         }
     }
 
-    private fun onTtsInit(status: Int) {
-        val t = tts
-        if (status != TextToSpeech.SUCCESS || t == null) {
-            ttsReady = false
-            ttsInitTried = false          // 允许下次弹题时重试
-            ttsInfo = "初始化失败（code=$status）"
-            GuardCore.diag(ctx, "语音引擎初始化失败 code=$status，只能用文字讲解")
-            return
-        }
-
+    /** 对一个已初始化成功的引擎设置音频通道并试中文；返回是否可用 */
+    private fun tryChinese(t: TextToSpeech): Boolean {
         try {
             t.setAudioAttributes(
                 AudioAttributes.Builder()
@@ -675,19 +735,28 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             )
         } catch (e: Throwable) { /* 老引擎不支持就跳过 */ }
 
-        // 中文优先，逐级退让；全都不可用说明这台手机没装中文语音数据
         var r = t.setLanguage(Locale.SIMPLIFIED_CHINESE)
-        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED)
             r = t.setLanguage(Locale.CHINESE)
-        }
-        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-            r = t.setLanguage(Locale.getDefault())
-        }
-        ttsReady = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED)
+            r = t.setLanguage(Locale.PRC)
+        return r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+    }
 
-        val engine = try { t.defaultEngine ?: "未知引擎" } catch (e: Throwable) { "未知引擎" }
-        ttsInfo = if (ttsReady) "引擎 $engine · 中文可用" else "引擎 $engine · 没有中文语音数据"
+    private fun engineName(t: TextToSpeech): String =
+        try { t.defaultEngine ?: "未知引擎" } catch (e: Throwable) { "未知引擎" }
 
+    /** 引擎包名 → 家长看得懂的短名 */
+    private fun engineLabel(pkg: String): String = when {
+        pkg.contains("huawei") -> "华为语音引擎"
+        pkg.contains("iflytek") || pkg.contains("vflytone") -> "讯飞语音"
+        pkg.contains("baidu") -> "百度语音"
+        pkg.contains("google") -> "谷歌语音"
+        pkg.contains("samsung") -> "三星语音"
+        else -> pkg.substringAfterLast('.').ifBlank { pkg }
+    }
+
+    private fun attachUtterListener(t: TextToSpeech) {
         t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
 
@@ -705,11 +774,136 @@ class OverlayQuiz private constructor(private val ctx: Context) {
                 if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
             }
         })
+    }
 
-        GuardCore.diag(ctx, "语音引擎就绪：$ttsInfo")
-        if (testPending) {
-            testPending = false
-            speak(TEST_SENTENCE)
+    private fun onTtsInit(status: Int) {
+        val t = tts
+        if (status != TextToSpeech.SUCCESS || t == null) {
+            ttsReady = false
+            ttsInitTried = false
+            // 记住的引擎可能被卸载了，清掉下次走默认
+            if (!prefs.getString("ttsEngine", "").isNullOrBlank())
+                prefs.edit().remove("ttsEngine").apply()
+            ttsInfo = "初始化失败（code=$status）"
+            GuardCore.diag(ctx, "语音引擎初始化失败 code=$status，只能用文字讲解")
+            ttsSettled = true
+            if (testPending) { testPending = false; openVoiceSettings() }
+            return
+        }
+
+        if (tryChinese(t)) {
+            ttsReady = true
+            ttsSettled = true
+            ttsInfo = "引擎 ${engineLabel(engineName(t))} · 中文可用"
+            attachUtterListener(t)
+            GuardCore.diag(ctx, "语音引擎就绪：$ttsInfo")
+            if (testPending) { testPending = false; speak(TEST_SENTENCE) }
+        } else {
+            ttsReady = false
+            val cur = engineName(t)
+            if (!prefs.getString("ttsEngine", "").isNullOrBlank()) {
+                // 之前记住的引擎现在没中文了（比如语音数据被清理），清掉重新探测
+                prefs.edit().remove("ttsEngine").apply()
+            }
+            ttsInfo = "引擎 ${engineLabel(cur)} · 没有中文语音包，正在找其他引擎…"
+            GuardCore.diag(ctx, "默认引擎无中文 → 自动探测其他引擎")
+            probeNextEngine()
+        }
+    }
+
+    /** 系统引擎按「最可能带中文」排序：华为 → 讯飞 → 百度 → 其他 → 谷歌（谷歌常缺数据，放最后） */
+    private val enginePriority = listOf(
+        "com.huawei.ttsengine",
+        "com.iflytek.speechsuite",
+        "com.iflytek.vflytone3.tts",
+        "com.baidu.speechsynthesis",
+        "com.samsung.SMT",
+        "com.google.android.tts"
+    )
+
+    /** 还没试过的引擎包名队列 */
+    private var probeQueue: MutableList<String>? = null
+    /** 正在初始化一个探测引擎（防止并发创建一堆 TTS） */
+    private var probing = false
+    private var probe: TextToSpeech? = null
+
+    /** 从队列里取下一个引擎，创建并试中文；队列空了 → 打开系统语音设置兜底 */
+    private fun probeNextEngine() {
+        if (probing) return
+        val t = tts ?: return
+        if (probeQueue == null) {
+            val cur = engineName(t)
+            val all = try { t.engines.map { it.name } } catch (e: Throwable) { emptyList<String>() }
+            val known = enginePriority.filter { it != cur && it in all }
+            val rest = all.filter { it != cur && it !in enginePriority }
+            probeQueue = (known + rest).toMutableList()
+        }
+        val next = probeQueue?.removeFirstOrNull()
+        if (next == null) {
+            ttsInfo = "所有语音引擎都没有中文语音包"
+            GuardCore.diag(ctx, "全部引擎无中文 → 打开系统语音设置")
+            ttsSettled = true
+            if (testPending) { testPending = false; openVoiceSettings() }
+            return
+        }
+        probing = true
+        GuardCore.diag(ctx, "尝试语音引擎：${engineLabel(next)}")
+        val p = try {
+            TextToSpeech(ctx, { s -> onProbeInit(next, s) }, next)
+        } catch (e: Throwable) {
+            probing = false
+            GuardCore.diag(ctx, "引擎 ${engineLabel(next)} 无法创建：${e.javaClass.simpleName}")
+            probeNextEngine()
+            return
+        }
+        probe = p
+    }
+
+    private fun onProbeInit(enginePkg: String, status: Int) {
+        val p = probe
+        probing = false
+        if (status != TextToSpeech.SUCCESS || p == null) {
+            GuardCore.diag(ctx, "引擎 ${engineLabel(enginePkg)} 初始化失败")
+            probeNextEngine()
+            return
+        }
+        if (!tryChinese(p)) {
+            try { p.shutdown() } catch (e: Throwable) {}
+            GuardCore.diag(ctx, "引擎 ${engineLabel(enginePkg)} 没有中文语音包")
+            probeNextEngine()
+            return
+        }
+        // 这个引擎有中文 → 换用它并永久记住，下次不再探测
+        try { tts?.shutdown() } catch (e: Throwable) {}
+        tts = p
+        ttsReady = true
+        ttsInitTried = true
+        ttsSettled = true
+        prefs.edit().putString("ttsEngine", enginePkg).apply()
+        ttsInfo = "引擎 ${engineLabel(enginePkg)} · 中文可用"
+        attachUtterListener(p)
+        GuardCore.diag(ctx, "语音引擎就绪：$ttsInfo（已记住）")
+        if (testPending) { testPending = false; speak(TEST_SENTENCE) }
+    }
+
+    /** 没有任何引擎带中文包：唯一剩下的办法是去系统设置装语音数据（这一步没有 API 可替代） */
+    private fun openVoiceSettings() {
+        try {
+            ctx.startActivity(
+                Intent("com.android.settings.TTS_SETTINGS")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            Toast.makeText(
+                ctx,
+                "这台手机还没装中文语音包：在打开的页面里选一个引擎 → 点「安装语音数据」，装好回来再点一次测试",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Throwable) {
+            Toast.makeText(
+                ctx,
+                "这台手机没有中文语音引擎，建议安装「讯飞语音引擎+」等免费 TTS 应用后再试",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -725,10 +919,19 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     fun voiceStatus(): String =
         if (ttsReady) "✅ 语音正常（$ttsInfo）" else "❌ $ttsInfo（讲解只能看文字）"
 
-    /** 家长页「测试语音讲解」：引擎还在初始化就等它好了再读 */
+    /** 家长页「测试语音讲解」：初始化/探测是异步的，好了自动读；全失败自动打开系统语音设置 */
     fun testVoice() {
         initTts()
-        if (ttsReady) speak(TEST_SENTENCE) else testPending = true
+        if (ttsReady) {
+            speak(TEST_SENTENCE)
+            return
+        }
+        if (ttsSettled) {
+            // 探测已经有结论还是不行 → 直接带家长去装语音包
+            openVoiceSettings()
+            return
+        }
+        testPending = true
     }
 
     private fun playTone(ok: Boolean) {

@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.BroadcastReceiver
 import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -70,10 +72,35 @@ class QuizService : Service() {
         }
     }
 
+    /**
+     * v3.4 锁屏暂停：监听息屏/亮屏。
+     * 息屏 → 弹题窗里的一切冻结（作答倒计时停住、不超时、不自动跳题）；
+     * 亮屏 → 从冻住的地方原样接上。今日时长本来就是息屏暂停的（GuardCore.tick）。
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            when (i?.action) {
+                Intent.ACTION_SCREEN_OFF -> OverlayQuiz.get(this@QuizService).onScreenOff()
+                Intent.ACTION_SCREEN_ON -> OverlayQuiz.get(this@QuizService).onScreenOn()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         prefs = GuardCore.prefs(this)
         running = true
+
+        // 注册息屏/亮屏监听（这两个 action 用动态注册才能收到）
+        try {
+            registerReceiver(
+                screenReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                }
+            )
+        } catch (e: Throwable) { /* 注册失败不影响守护 */ }
 
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -408,6 +435,7 @@ class QuizService : Service() {
 
     override fun onDestroy() {
         h.removeCallbacks(ticker)
+        try { unregisterReceiver(screenReceiver) } catch (e: Throwable) { /* 可能没注册上 */ }
         stopSilentKeepAlive()
         stopGhostWindow()
         try {

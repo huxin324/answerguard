@@ -192,9 +192,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.voiceTestBtn).setOnClickListener {
             val oq = OverlayQuiz.get(this)
             oq.testVoice()
+            // 引擎探测是异步的（可能要逐个试好几个引擎），多等一会儿再报状态
             uiHandler.postDelayed({
                 Toast.makeText(this, oq.voiceStatus(), Toast.LENGTH_LONG).show()
-            }, 1500)
+            }, 3000)
         }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
             saveConfig()
@@ -506,7 +507,7 @@ class MainActivity : AppCompatActivity() {
         else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
         val escTxt = if (escape > 0) "\n被强行结束时追加惩罚：$escape 次" else ""
         val emgTxt = if (emgCount > 0) "\n家长紧急解锁：$emgCount 次" else ""
-        diagTv.text = "v3.2\n${selfCheck()}\n${beatText()}\n$stats$escTxt$emgTxt\n" +
+        diagTv.text = "v3.4\n${selfCheck()}\n${beatText()}\n$stats$escTxt$emgTxt\n" +
             "语音：${OverlayQuiz.get(this).voiceStatus()}\n" +
             "上次动作：${prefs.getString("diag", "还没启动过")}"
         updateHint()
