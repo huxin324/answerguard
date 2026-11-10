@@ -2,72 +2,81 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        ★v3.2 关键修复：安卓 11（API 30）起有「软件包可见性」限制，App 不加这段 queries
-        就看不到系统里的语音引擎（TTS），TextToSpeech 初始化会静默失败 —— 表现就是
-        「语音讲解没声音、也不报错」，只能用文字。华为 Mate60 / OPPO 都属于这一档。
+        电视版 v1.0（基于手机版 v3.5 同一套守护内核）。
+        电视系统的权限管控远松于手机：悬浮窗授权一次即可全局弹题（盖在直播/视频上面），
+        也没有「一键清理后台」，守护服务被杀的风险很小 —— 手机版那套华为专属的
+        「启动管理 / 后台弹窗 / 锁卡片」引导在这里全部不需要，已删除。
     -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE" />
-        </intent>
-    </queries>
+
+    <!--
+        电视适配（关键）：
+        ① leanback 非必需 —— 让 App 同时出现在「电视桌面」和普通应用列表里；
+        ② 触摸屏非必需 —— 电视没有触摸屏，全部操作走遥控器（D-pad 上下左右 + OK 键）。
+        不声明这两条，部分电视的应用商店/桌面会直接把 App 过滤掉。
+    -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
 
     <!-- 后台常驻通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 前台服务：提高进程优先级 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- 前台服务类型 mediaPlayback：让守护进程像音乐 App 一样常驻，不被系统冻结 -->
+    <!-- 前台服务类型 mediaPlayback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <!-- 唤醒锁：保持静音播放通道，防止后台被冻结（v1.7 核心） -->
+    <!-- 唤醒锁 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- 悬浮窗：允许在任何 App 上面弹出答题窗口（核心权限） -->
+    <!-- 悬浮窗：允许在任何 App 上面弹出答题窗口（电视核心权限，授权一次即可） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- 电池优化白名单，防止后台服务被系统杀掉 -->
+    <!-- 电池优化白名单（部分电视盒子上才有这个页面，没有就静默跳过） -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- 精确闹钟（第二重保险） -->
+    <!-- 精确闹钟 -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- 安卓 13+ 自动授予的精确闹钟权限：保证「复活闹钟」不会被系统延后 -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 开机自启 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
-        android:label="答题守护"
+        android:banner="@drawable/banner"
+        android:label="答题守护TV"
         android:supportsRtl="true"
         android:theme="@style/Theme.AnswerLock">
 
         <!--
-            v2.8：**保留**最近任务卡片（去掉 v2.7 的 excludeFromRecents）。
-            实测推翻 v2.7 结论：华为最近任务里把卡片「下拉上锁」之后，上划并不能杀掉它
-            （用户真机验证：手动上锁后上划无效），锁对"上划/一键清理"都有效，
-            是华为唯一官方免清理通道。代价是孩子也能点开卡片 → 由 MainActivity 的
-            家长密码锁层（refreshLockLayer）挡住，点开只能看到「守护运行中 + 输密码」。
+            电视桌面图标：category 里加上 LEANBACK_LAUNCHER 才会出现在电视桌面上；
+            保留 LAUNCHER 兼容部分电视/盒子的普通应用列表。
+            banner 是电视桌面上的「大横幅图标」（320x180）。
         -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
 
         <!--
             答题界面是 WindowManager 悬浮窗（不启动 Activity）：
-            华为/鸿蒙限制「后台启动界面」，Activity 弹不出来；悬浮窗只要
-            「显示在其他应用上层」权限即可，且上划任务列表滑不掉。
+            弹在直播/视频 App 上面，窗口带焦点 → 遥控器直接操作，
+            按返回键也关不掉（返回键被吃掉，必须答对或家长解锁）。
         -->
 
         <!--
-            无障碍守护服务（v1.6 核心）：
-            由系统绑定并常驻，不会被鸿蒙「后台冻结」，用它的 Handler 每秒心跳来计时，
-            从而做到离开 App 也能准时弹题。
+            无障碍守护服务（备用通道）：
+            电视上通常拿不到无障碍权限，服务绑定不上就自动退到
+            「前台服务静音保活 + 每秒心跳」的主通道，不影响使用。
         -->
         <service
             android:name=".GuardAccessibilityService"
             android:exported="true"
-            android:label="答题守护"
+            android:label="答题守护TV"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -82,8 +91,9 @@
             android:exported="false" />
 
         <!--
-            设备管理器：激活后系统不允许「强行停止」本应用，上滑清理 / 一键清理都会跳过它。
-            这是「上划就能结束进程」的唯一系统级解法（需要家长授权一次）。
+            设备管理器（防卸载，可选）：
+            电视上大部分机型没有「设备管理器」页面，家长页的开关点不了也没关系——
+            电视系统本来就不提供「强行停止」的常规入口，这项只是给支持的机型锦上添花。
         -->
         <receiver
             android:name=".GuardAdminReceiver"
@@ -105,7 +115,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- stopWithTask=false：任务被划掉也不停止服务，配合 onTaskRemoved 立刻重弹 -->
+        <!-- stopWithTask=false：任务被划掉也不停止服务 -->
         <service
             android:name=".QuizService"
             android:exported="false"

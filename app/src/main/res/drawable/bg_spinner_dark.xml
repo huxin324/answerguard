@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电视版深色主题：Spinner 背景 = 深色字段 + 右侧浅色下拉箭头（必须自绘箭头，否则是裸文字） -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#0F1424" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="1.5dp"
+                android:color="#3A4763" />
+        </shape>
+    </item>
+    <item
+        android:width="16dp"
+        android:height="16dp"
+        android:right="18dp"
+        android:gravity="end|center_vertical"
+        android:drawable="@drawable/ic_chevron_down_light" />
+</layer-list>

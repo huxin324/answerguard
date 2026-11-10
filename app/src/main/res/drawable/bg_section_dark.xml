@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电视版深色主题：配置卡片底 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#161C2C" />
+    <corners android:radius="18dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#26304A" />
+</shape>

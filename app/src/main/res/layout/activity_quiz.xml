@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    电视版答题弹窗（悬浮窗内容，全套按客厅电视重新设计）：
+    · 铺满全屏的深色遮罩 + 居中大卡片：电视是 2-3 米观看距离，字号比手机版大 1.5-2 倍；
+    · 选项按钮由代码按「每行 2 个」排进 optionsBox（横屏遥控器焦点左右移动最顺手）；
+    · 全部可聚焦控件用 bg_opt（聚焦 = 亮蓝 + 白描边），遥控器焦点一眼可见；
+    · 紧急解锁 / 锁屏的密码输入带 26 键软键盘 —— 电视不一定有输入法，遥控器直接点。
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#CC0D1220"
+    android:background="#E60A0F1C"
     android:gravity="center">
 
     <!-- 答题卡片 -->
@@ -11,16 +18,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:layout_margin="20dp"
-        android:background="@drawable/bg_card">
+        android:layout_margin="56dp"
+        android:background="@drawable/bg_card_dark">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:padding="40dp">
 
-            <!-- 顶部一行：科目 + 右上角「紧急解锁」（家长紧急用手机时跳过解题） -->
+            <!-- 顶部一行：科目 + 右侧「紧急解锁」 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -32,25 +39,25 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="📘 数学 · 答对才能继续玩"
-                    android:textColor="#2F6BFF"
-                    android:textSize="14sp"
+                    android:text="📘 数学 · 答对才能继续看"
+                    android:textColor="#7FB0FF"
+                    android:textSize="20sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/emergencyBtn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_field"
+                    android:background="@drawable/bg_opt"
                     android:clickable="true"
                     android:focusable="true"
-                    android:paddingStart="10dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="10dp"
-                    android:paddingBottom="6dp"
+                    android:paddingStart="24dp"
+                    android:paddingTop="12dp"
+                    android:paddingEnd="24dp"
+                    android:paddingBottom="12dp"
                     android:text="🆘 紧急解锁"
-                    android:textColor="#B26A00"
-                    android:textSize="12sp" />
+                    android:textColor="#FFD54F"
+                    android:textSize="17sp" />
             </LinearLayout>
 
             <!-- 答题主体（打开紧急解锁面板时整块隐藏） -->
@@ -60,73 +67,81 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/penaltyTv"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="⚠️ 答错加题"
-                android:textColor="#E5484D"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+                <TextView
+                    android:id="@+id/penaltyTv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="⚠️ 答错加题"
+                    android:textColor="#FF6E6E"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/timerTv"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="⏳ 剩余作答时间"
-                android:textColor="#F59E0B"
-                android:textSize="13sp" />
+                <TextView
+                    android:id="@+id/timerTv"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="⏳ 剩余作答时间"
+                    android:textColor="#FFB74D"
+                    android:textSize="20sp" />
 
-            <TextView
-                android:id="@+id/questionTv"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:layout_marginBottom="14dp"
-                android:text="题目"
-                android:textColor="#1F2430"
-                android:textSize="22sp"
-                android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/questionTv"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:defaultFocusHighlightEnabled="false"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="8dp"
+                    android:lineSpacingExtra="6dp"
+                    android:text="题目"
+                    android:textColor="#F2F5FA"
+                    android:textSize="38sp"
+                    android:textStyle="bold" />
 
-            <LinearLayout
-                android:id="@+id/optionsBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
+                <!-- 选项：代码按每行 2 个填充 -->
+                <LinearLayout
+                    android:id="@+id/optionsBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:orientation="vertical" />
 
-            <TextView
-                android:id="@+id/feedbackTv"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:gravity="center"
-                android:textColor="#1F2430"
-                android:textSize="14sp" />
+                <TextView
+                    android:id="@+id/feedbackTv"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center"
+                    android:textColor="#F2F5FA"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/explainTv"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:background="#F2F6FF"
-                android:lineSpacingExtra="4dp"
-                android:padding="12dp"
-                android:textColor="#1F2430"
-                android:textSize="13sp"
-                android:visibility="gone" />
+                <TextView
+                    android:id="@+id/explainTv"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#16223F"
+                    android:lineSpacingExtra="6dp"
+                    android:padding="20dp"
+                    android:textColor="#C9D6F2"
+                    android:textSize="19sp"
+                    android:visibility="gone" />
 
-            <Button
-                android:id="@+id/replayBtn"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="#EEF2FF"
-                android:text="🔊 再听一遍讲解"
-                android:textColor="#2F6BFF"
-                android:visibility="gone" />
+                <Button
+                    android:id="@+id/replayBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="10dp"
+                    android:backgroundTint="#1C2740"
+                    android:text="🔊 再听一遍讲解"
+                    android:textColor="#7FB0FF"
+                    android:textSize="18sp"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- 紧急解锁面板：输家长密码 → 本轮作废 + 10 分钟免打扰 -->
@@ -141,129 +156,167 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="🆘 家长紧急解锁"
-                    android:textColor="#1F2430"
-                    android:textSize="19sp"
+                    android:textColor="#F2F5FA"
+                    android:textSize="28sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:background="#FFF4E5"
-                    android:lineSpacingExtra="3dp"
-                    android:padding="12dp"
+                    android:layout_marginTop="14dp"
+                    android:background="#2A2010"
+                    android:lineSpacingExtra="5dp"
+                    android:padding="20dp"
                     android:text="输入家长密码后：\n· 本轮题目立即作废，不用再答\n· 接下来 10 分钟不弹题、不计使用时长\n· 10 分钟后自动恢复守护"
-                    android:textColor="#8C4038"
-                    android:textSize="13sp" />
+                    android:textColor="#E8C49A"
+                    android:textSize="17sp" />
 
                 <EditText
                     android:id="@+id/emgPwd"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="14dp"
-                    android:background="@drawable/bg_field"
+                    android:layout_width="620dp"
+                    android:layout_height="64dp"
+                    android:layout_marginTop="20dp"
+                    android:layout_gravity="center_horizontal"
+                    android:background="@drawable/bg_field_dark"
                     android:gravity="center"
                     android:hint="家长密码"
-                    android:inputType="numberPassword"
+                    android:inputType="textPassword"
                     android:maxLength="8"
-                    android:textSize="16sp" />
+                    android:textColor="#F2F5FA"
+                    android:textColorHint="#5F6C88"
+                    android:textSize="22sp" />
+
+                <!-- 遥控器 26 键软键盘（代码生成） -->
+                <LinearLayout
+                    android:id="@+id/emgPadBox"
+                    android:layout_width="620dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:layout_gravity="center_horizontal"
+                    android:orientation="vertical" />
 
                 <TextView
                     android:id="@+id/emgErrTv"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:gravity="center"
                     android:text="密码不对"
-                    android:textColor="#C0392B"
-                    android:textSize="12sp"
+                    android:textColor="#FF6E6E"
+                    android:textSize="16sp"
                     android:visibility="gone" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="18dp"
                     android:orientation="horizontal">
 
                     <Button
                         android:id="@+id/emgCancelBtn"
                         android:layout_width="0dp"
-                        android:layout_height="46dp"
+                        android:layout_height="64dp"
+                        android:layout_marginEnd="10dp"
                         android:layout_weight="1"
-                        android:backgroundTint="#F0F2F6"
+                        android:backgroundTint="#1C2740"
                         android:text="取消"
-                        android:textColor="#7A8194" />
+                        android:textColor="#9AA6C0"
+                        android:textSize="20sp" />
 
                     <Button
                         android:id="@+id/emgOkBtn"
                         android:layout_width="0dp"
-                        android:layout_height="46dp"
+                        android:layout_height="64dp"
                         android:layout_marginStart="10dp"
                         android:layout_weight="1"
                         android:backgroundTint="#F59E0B"
                         android:text="确认解锁"
-                        android:textColor="#FFFFFF" />
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
 
-    <!-- 锁屏页 -->
+    <!-- 锁屏页：今日时间用完 -->
     <LinearLayout
         android:id="@+id/lockBox"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#10162A"
-        android:gravity="center"
+        android:background="#0A0E1A"
+        android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:padding="32dp"
+        android:padding="56dp"
         android:visibility="gone">
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="🔒"
-            android:textSize="56sp" />
+            android:textSize="80sp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="今日时间已用完"
+            android:layout_marginTop="14dp"
+            android:text="今日看电视时间已用完"
             android:textColor="#FFFFFF"
-            android:textSize="24sp"
+            android:textSize="34sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:gravity="center"
-            android:text="去阅读、运动或休息一下吧！\n想继续使用需要家长输入密码解锁。"
+            android:lineSpacingExtra="4dp"
+            android:text="去阅读、运动或休息一下吧！\n想继续看需要家长用遥控器输密码解锁。"
             android:textColor="#AAB3C9"
-            android:textSize="14sp" />
+            android:textSize="19sp" />
 
         <EditText
             android:id="@+id/lockPwd"
-            android:layout_width="220dp"
-            android:layout_height="48dp"
-            android:layout_marginTop="24dp"
+            android:layout_width="620dp"
+            android:layout_height="64dp"
+            android:layout_marginTop="28dp"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/bg_field_dark"
             android:gravity="center"
             android:hint="请输入家长密码"
             android:inputType="textPassword"
             android:maxLength="8"
             android:textColor="#FFFFFF"
-            android:textColorHint="#7A8194" />
+            android:textColorHint="#5F6C88"
+            android:textSize="22sp" />
+
+        <!-- 遥控器 26 键软键盘（代码生成） -->
+        <LinearLayout
+            android:id="@+id/lockPadBox"
+            android:layout_width="620dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_gravity="center_horizontal"
+            android:orientation="vertical" />
 
         <Button
             android:id="@+id/unlockBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
-            android:paddingStart="40dp"
-            android:paddingEnd="40dp"
+            android:layout_width="620dp"
+            android:layout_height="64dp"
+            android:layout_marginTop="14dp"
+            android:layout_gravity="center_horizontal"
             android:backgroundTint="#2F6BFF"
             android:text="解锁"
-            android:textColor="#FFFFFF" />
+            android:textColor="#FFFFFF"
+            android:textSize="20sp" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
     </LinearLayout>
 </FrameLayout>

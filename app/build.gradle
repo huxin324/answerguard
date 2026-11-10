@@ -11,8 +11,9 @@ android {
         applicationId "com.family.answerlock"
         minSdk 24
         targetSdk 33
-        versionCode 26
-        versionName "3.5"
+        // 电视版独立版本线：从 100 起算，和手机版（26 = v3.5）区分开
+        versionCode 102
+        versionName "1.2.0"
     }
 
     buildTypes {

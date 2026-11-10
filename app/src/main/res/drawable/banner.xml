@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    电视桌面大横幅图标（banner，320x180）：
+    深蓝底 + 蓝色盾牌 + 白色对勾，和 App 的守护定位一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#14203A"
+        android:pathData="M0,0h320v180h-320z" />
+    <path
+        android:fillColor="#2F6BFF"
+        android:pathData="M160,28 L212,50 L212,96 C212,128 178,148 160,154 C142,148 108,128 108,96 L108,50 Z" />
+    <path
+        android:pathData="M136,92 L154,112 L188,68"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

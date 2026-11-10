@@ -147,7 +147,7 @@ object GuardCore {
      * 注意：本文件是 object GuardCore，object 里不能再写 companion object（编译报错
      * 「Companion object is not allowed here」），常量直接写在 object 体内即可。
      */
-    const val QUIZ_BATCH = 5
+    const val QUIZ_BATCH = 3
 
     /* ================= 启动 / 恢复 ================= */
 
@@ -298,7 +298,7 @@ object GuardCore {
             OverlayQuiz.get(c).showLock()
             diag(c, "今日时间用完 → 已锁屏")
         } else {
-            // 到点弹题：一次压入 5 题（QUIZ_BATCH），答错还会额外追加
+            // 到点弹题：一次压入 3 题（QUIZ_BATCH），答错还会额外追加
             val batch = p.getInt("pending", 0) + QUIZ_BATCH
             p.edit().putInt("remaining", rest).putInt("pending", batch)
                 .putLong("lastAtWall", now).apply()

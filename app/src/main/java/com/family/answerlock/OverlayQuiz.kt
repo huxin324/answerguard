@@ -83,6 +83,9 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     private var replayBtn: Button? = null
     private var pwdEt: EditText? = null
 
+    /** 当前题目的选项按钮（电视版：答完要恢复焦点 / 紧急解锁面板关掉后焦点回选项） */
+    private val optBtns = ArrayList<Button>()
+
     /* ---------- 紧急解锁状态 ---------- */
     /** 打开密码面板时暂停倒计时，取消后从原处继续 */
     private var emgOpen = false
@@ -328,7 +331,11 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         emgPwd?.setText("")
         quizPanel?.visibility = View.GONE
         emgBox?.visibility = View.VISIBLE
-        emgPwd?.requestFocus()
+        // 电视版：紧急解锁的密码也走屏幕键盘（遥控器上下左右 + OK）
+        root?.findViewById<LinearLayout>(R.id.emgPadBox)?.let { pad ->
+            emgPwd?.let { et -> QwertyPad.attach(pad) { et } }
+            QwertyPad.focusFirst(pad)
+        }
     }
 
     /** 取消：回到题目，倒计时从刚才暂停的地方继续 */
@@ -343,6 +350,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             ui.postDelayed(nextRunnable, 3000)
         } else if (cur != null) {
             startTimer(emgLeftSec.coerceAtLeast(5))
+            // 不再把焦点塞回某个选项：答案位置是随机的，让用户自己选
+            optionsBox?.post { hintFocus() }
         }
     }
 
@@ -496,7 +505,7 @@ class OverlayQuiz private constructor(private val ctx: Context) {
 
     /** 画一道题 + 起倒计时。startSec = 这题还剩多少秒可答 */
     private fun render(q: QuestionBank.Q, startSec: Int) {
-        subjectTv?.text = "📘 ${q.subject} · 答对才能继续玩"
+        subjectTv?.text = "📘 ${q.subject} · 答对才能继续看"
         if (pending > 0) {
             penaltyTv?.visibility = View.VISIBLE
             penaltyTv?.text = "⚠️ 答错加题 · 还需连答 $pending 题"
@@ -507,19 +516,49 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         explainTv?.visibility = View.GONE
         replayBtn?.visibility = View.GONE
         optionsBox?.removeAllViews()
+        optBtns.clear()
 
-        q.options.forEach { opt ->
+        // 电视版：选项每行 2 个（横屏下遥控器左右移动最顺手）、大字号 + 聚焦高亮样式，
+        // 同时把按钮登记进 optBtns（answer() 答完禁点、紧急解锁关面板后焦点回收都靠它）。
+        val d = ctx.resources.displayMetrics.density
+        var row: LinearLayout? = null
+        q.options.forEachIndexed { i, opt ->
+            if (i % 2 == 0) {
+                val r = LinearLayout(ctx)
+                r.orientation = LinearLayout.HORIZONTAL
+                val rlp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                rlp.topMargin = if (i == 0) 0 else (16 * d).toInt()
+                optionsBox?.addView(r, rlp)
+                row = r
+            }
             val b = Button(ctx)
             b.text = opt
-            b.textSize = 16f
-            b.setAllCaps(false)
-            b.setPadding(0, 28, 0, 28)
+            b.textSize = 24f
+            b.isAllCaps = false
+            b.setBackgroundResource(R.drawable.bg_opt)   // 聚焦 = 亮蓝底 + 白描边
+            b.setTextColor(0xFFF2F5FA.toInt())
+            b.setPadding((10 * d).toInt(), (18 * d).toInt(), (10 * d).toInt(), (18 * d).toInt())
             b.setOnClickListener { answer(opt, b) }
-            optionsBox?.addView(b)
+            val blp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            blp.setMargins((6 * d).toInt(), 0, (6 * d).toInt(), 0)
+            row?.addView(b, blp)
+            optBtns.add(b)
         }
 
         answerTimer?.cancel()
         startTimer(startSec)
+        // 不再自动把焦点放在第一项上：答案位置随机，自动聚焦等于帮孩子选了一个，
+        // 交给孩子自己按方向键移过去（父容器 focusable，第一下方向键就能进选项区）
+        optionsBox?.post { hintFocus() }
+    }
+
+    /** 让焦点停在题目区而不是某个选项上：方向键一下就能进选项，回车不会直接作答 */
+    private fun hintFocus() {
+        if (optBtns.isEmpty()) return
+        questionTv?.requestFocus()
     }
 
     /** 倒计时（抽出来是因为「紧急解锁 → 取消」要从暂停的地方接着走） */
@@ -550,11 +589,15 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         val q = cur ?: return
         answerTimer?.cancel()
         val box = optionsBox ?: return
-        for (i in 0 until box.childCount) box.getChildAt(i).isEnabled = false
+        // 答完这题就不许再改：全部禁点，且把对/错颜色画上（保留圆角，不突兀）
+        for (b in optBtns) {
+            b.isEnabled = false
+            b.isFocusable = false
+        }
 
         if (opt == q.answer) {
             playTone(true)
-            btn.setBackgroundColor(0xFF18A058.toInt())
+            btn.setBackgroundResource(R.drawable.bg_opt_ok)
             btn.setTextColor(0xFFFFFFFF.toInt())
             addStat("ok")
             if (pending > 0) {
@@ -562,15 +605,15 @@ class OverlayQuiz private constructor(private val ctx: Context) {
                 prefs.edit().putInt("pending", pending).apply()
                 feedbackTv?.text = if (pending > 0)
                     "✅ 答对了！但因之前答错，还需再答 $pending 题"
-                else "✅ 答对了！加题已还清，继续玩吧～"
+                else "✅ 答对了！加题已还清，继续看吧～"
                 ui.postDelayed({ nextQuestion() }, 1600)
             } else {
-                feedbackTv?.text = "✅ 答对了！可以继续玩～"
+                feedbackTv?.text = "✅ 答对了！可以继续看～"
                 ui.postDelayed({ close() }, 1000)
             }
         } else {
             playTone(false)
-            btn.setBackgroundColor(0xFFE5484D.toInt())
+            btn.setBackgroundResource(R.drawable.bg_opt_no)
             btn.setTextColor(0xFFFFFFFF.toInt())
             val penalty = prefs.getInt("penalty", 2)
             pending += penalty
@@ -649,6 +692,11 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             } else {
                 Toast.makeText(ctx, "❌ 密码错误", Toast.LENGTH_SHORT).show()
             }
+        }
+        // 电视版：锁屏页的密码用屏幕键盘输（遥控器上下左右 + OK）
+        root?.findViewById<LinearLayout>(R.id.lockPadBox)?.let { pad ->
+            QwertyPad.attach(pad) { et }
+            QwertyPad.focusFirst(pad)
         }
     }
 

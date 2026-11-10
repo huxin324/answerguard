@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主界面 -->
-    <style name="Theme.AnswerLock" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="android:statusBarColor">#F5F6F8</item>
-        <item name="android:windowLightStatusBar">true</item>
+    <!--
+        电视版：全局深色主题。
+        深底白字是电视 UI 的基本盘（客厅暗光环境不刺眼、大屏对比度高），
+        windowBackground 直接给深色，避免启动瞬间闪一下白屏。
+    -->
+    <style name="Theme.AnswerLock" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0D1117</item>
+        <item name="android:colorBackground">#0D1117</item>
     </style>
 
     <!-- 全局答题弹窗：透明全屏 -->

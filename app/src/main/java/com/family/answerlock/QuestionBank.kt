@@ -53,11 +53,13 @@ object QuestionBank {
 
     fun make(grade: Int, subjects: List<String>): Q {
         val subs = if (subjects.isEmpty()) listOf("math") else subjects
-        return when (subs[Random.nextInt(subs.size)]) {
+        val q = when (subs[Random.nextInt(subs.size)]) {
             "chinese" -> cn(grade)
             "english" -> en(grade)
             else -> math(grade, currentSemester())
         }
+        // 出口统一再打乱一次：个别题型漏了 shuffled() 也不会让正确答案总在第一个
+        return q.copy(options = q.options.shuffled())
     }
 
     /* ================= 数学：严格按人教版年级+学期 ================= */

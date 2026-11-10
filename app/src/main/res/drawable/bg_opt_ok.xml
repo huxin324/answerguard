@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 答对后的选项底：绿色（保留圆角，不让选中瞬间变方块） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#18A058" />
+    <corners android:radius="14dp" />
+    <stroke
+        android:width="2dp"
+        android:color="#FFFFFF" />
+</shape>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Spinner 收起态的自绘条目（深色主题）：
+    ArrayAdapter 默认绑 android.R.id.text1，所以这里必须用同 id。
+    下拉展开列表仍用系统的 simple_spinner_dropdown_item（白底深字，看得清楚）。
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/text1"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="40dp"
+    android:singleLine="true"
+    android:ellipsize="end"
+    android:textColor="#F2F5FA"
+    android:textSize="19sp" />
