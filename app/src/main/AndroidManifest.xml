@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        ★v3.2 关键修复：安卓 11（API 30）起有「软件包可见性」限制，App 不加这段 queries
+        就看不到系统里的语音引擎（TTS），TextToSpeech 初始化会静默失败 —— 表现就是
+        「语音讲解没声音、也不报错」，只能用文字。华为 Mate60 / OPPO 都属于这一档。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <!-- 后台常驻通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 前台服务：提高进程优先级 -->

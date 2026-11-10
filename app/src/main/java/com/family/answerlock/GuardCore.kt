@@ -40,7 +40,86 @@ object GuardCore {
     /** 上次「重新弹题」的秒级时间，避免每秒都重试 */
     @Volatile private var lastReshowSec = 0L
 
+    /** 日期戳缓存（避免每秒都 new 一个 SimpleDateFormat） */
+    private var dayKeyCache = ""
+    private var dayKeyAt = 0L
+
+    /** 家长紧急解锁的默认免打扰时长（分钟）：这段时间不弹题、也不扣今日时长 */
+    const val EMERGENCY_MIN = 10
+
     fun prefs(c: Context): SharedPreferences = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private fun dayOf(wall: Long): String =
+        SimpleDateFormat("yyyyMMdd", Locale.CHINA).format(Date(wall))
+
+    /** 带缓存的「今天」：心跳每秒都调，10 秒内不重复格式化 */
+    private fun todayCached(now: Long): String {
+        if (dayKeyCache.isNotEmpty() && now - dayKeyAt < 10_000L) return dayKeyCache
+        dayKeyCache = dayOf(now)
+        dayKeyAt = now
+        return dayKeyCache
+    }
+
+    /** 两个时间戳是不是同一天（跨天的「中断」不算孩子逃课，不能扣时间） */
+    fun sameDay(a: Long, b: Long): Boolean = dayOf(a) == dayOf(b)
+
+    /**
+     * 跨天自动重置（v3.2 修的严重 bug）。
+     *
+     * 原来「今日剩余时长」落盘在 remaining 里，**没有任何跨天清零逻辑**：
+     * 昨天把 30 分钟用完 → remaining = 0 → 今天一打开 App 就直接显示「今日时长已用完」，
+     * 孩子还没玩一分钟。OPPO 上装完第二天打开也是同一个原因。
+     * 现在每次心跳 / 打开 App 都先对一下日期，换了天就把额度、题堆、锁定状态全部重置。
+     */
+    fun rolloverIfNeeded(c: Context) {
+        val p = prefs(c)
+        val now = System.currentTimeMillis()
+        val today = todayCached(now)
+        val last = p.getString("dayKey", "") ?: ""
+        if (last == today) return
+
+        val daily = p.getInt("dailyMin", 30).coerceAtLeast(1)
+        val wasLockOverlay = p.getString("overlayMode", "") == "lock"
+        p.edit()
+            .putString("dayKey", today)
+            .putInt("remaining", daily * 60)
+            .putInt("pending", 0)
+            .putBoolean("locked", false)
+            .putBoolean("overlayOpen", false)
+            .putString("overlayMode", "")
+            .putLong("emergencyUntil", 0L)
+            .putLong("lastAtWall", now)
+            .putLong("lastBeatWall", now)
+            .apply()
+        lastAtWall = now
+        flushCounter = 0
+        dayKeyCache = today
+        dayKeyAt = now
+        // 跨天时正好停在「今日时间用完」那一屏 → 直接收掉，新的一天不该还被锁着
+        if (wasLockOverlay) try { OverlayQuiz.get(c).close() } catch (e: Throwable) { }
+        diag(c, "新的一天 → 今日时长重置为 $daily 分钟")
+    }
+
+    /** 家长紧急解锁：本轮题目作废，接下来 N 分钟不弹题、也不计使用时长 */
+    fun startEmergency(c: Context, minutes: Int, reason: String) {
+        val p = prefs(c)
+        val now = System.currentTimeMillis()
+        val until = now + minutes * 60_000L
+        p.edit()
+            .putLong("emergencyUntil", until)
+            .putInt("pending", 0)
+            .putInt("emgCount", p.getInt("emgCount", 0) + 1)
+            .putLong("lastAtWall", now)
+            .apply()
+        lastAtWall = now
+        diag(c, "紧急解锁（$reason）→ 本轮题目作废，$minutes 分钟内不弹题、不计时长")
+    }
+
+    /** 紧急解锁还剩几秒（0 = 没有在紧急状态） */
+    fun emergencyLeftSec(c: Context): Int {
+        val left = (prefs(c).getLong("emergencyUntil", 0L) - System.currentTimeMillis()) / 1000L
+        return if (left > 0L) left.toInt() else 0
+    }
 
     /* ================= 日志 / 通知 ================= */
 
@@ -76,11 +155,15 @@ object GuardCore {
     fun bootstrap(c: Context) {
         val p = prefs(c)
         val now = System.currentTimeMillis()
+        val daily = p.getInt("dailyMin", 30).coerceAtLeast(1)
         p.edit()
-            .putInt("remaining", p.getInt("dailyMin", 30) * 60)
+            .putInt("remaining", daily * 60)
             .putBoolean("locked", false)
             .putInt("pending", 0)
             .putLong("lastAtWall", now)
+            .putLong("lastBeatWall", now)
+            .putString("dayKey", todayCached(now))
+            .putLong("emergencyUntil", 0L)
             .putBoolean("guardOn", true)
             .apply()
         lastAtWall = now
@@ -93,14 +176,19 @@ object GuardCore {
      * 守护恢复（App 被杀后重回 / 开机 / 无障碍服务重新绑定）。
      * 把「不在的时间」照常扣掉，孩子强停 App 也绕不过去；单次最多补扣 10 分钟，
      * 避免关机一整晚后第二天直接没时间用。
+     *
+     * v3.2：先做跨天重置 —— 隔夜的中断绝不能算到今天的账上（这正是「刚打开就说今日
+     * 时长已用完」的第二个原因：昨天 22 点被杀，今天 8 点打开，中断 10 小时被全额扣掉）。
      */
     fun restore(c: Context) {
         val p = prefs(c)
         if (!p.getBoolean("guardOn", false)) return
+        rolloverIfNeeded(c)
         val now = System.currentTimeMillis()
         var last = p.getLong("lastAtWall", now)
         if (last <= 0L || last > now) last = now
-        val gone = ((now - last) / 1000L).toInt().coerceIn(0, 600)
+        // 跨天的中断不补扣（rollover 已经把基准前移到 now 了，这里的 sameDay 只是双保险）
+        val gone = if (sameDay(last, now)) ((now - last) / 1000L).toInt().coerceIn(0, 600) else 0
         val remaining = (p.getInt("remaining", 0) - gone).coerceAtLeast(0)
         p.edit().putInt("remaining", remaining).putLong("lastAtWall", now).apply()
         lastAtWall = now
@@ -134,6 +222,9 @@ object GuardCore {
         val p = prefs(c)
         val now = System.currentTimeMillis()
 
+        // 跨天先重置额度：否则昨天的「0 分钟」会被带到今天（v3.2 修）
+        rolloverIfNeeded(c)
+
         // 记录「心跳最长中断」：正常应约 1 秒。若出现几十秒的空洞，
         // 说明后台进程被系统冻结过（这就是不弹题的证据，家长页会直接显示）
         val prevBeat = lastBeat
@@ -147,6 +238,19 @@ object GuardCore {
         lastBeat = now
 
         if (!p.getBoolean("guardOn", false)) return
+
+        // 家长点了「紧急解锁」：这段免打扰时间里不弹题、也不扣时长（是家长在用手机），
+        // 基准时间一直前移，所以过了这 10 分钟也不会反过来扣掉这段时间。
+        val emgUntil = p.getLong("emergencyUntil", 0L)
+        if (emgUntil > now) {
+            lastAtWall = now
+            flush(p, now)
+            return
+        }
+        if (emgUntil > 0L) {
+            p.edit().putLong("emergencyUntil", 0L).apply()
+            diag(c, "紧急解锁结束 → 恢复弹题")
+        }
 
         // 自愈：有题没答完，但窗口已经不在了（孩子划掉任务 / 系统移除窗口 / 进程被重建）
         // → 每 1 秒重新弹一次，删进程 ≠ 逃脱，必须答对才能离开。
@@ -266,7 +370,9 @@ object GuardCore {
         val extra = minOf((gapMin / 2).toInt(), 6)            // 每中断 2 分钟多 1 题，最多 +6
         val addQ = pen + extra
         val remain = p.getInt("remaining", p.getInt("dailyMin", 30) * 60)
-        val dockSec = minOf(remain, (gapMin * 60).toInt())     // 中断期间照样算使用时长
+        // 单次最多扣 10 分钟（和 restore 的上限保持一致）：中断很久多半是手机关机，
+        // 全额扣会把「今日额度」一次清零 —— 那正是「刚打开就说时长用完」的来源。
+        val dockSec = minOf(remain, 600, (gapMin * 60).toInt())  // 中断期间照样算一部分使用时长
         val esc = p.getInt("escapes", 0) + 1
         p.edit()
             .putInt("escapes", esc)
@@ -274,6 +380,7 @@ object GuardCore {
             .putInt("remaining", remain - dockSec)
             .putLong("lastBeatWall", now)
             .putLong("lastAtWall", now)
+            .putString("dayKey", todayCached(now))
             .apply()
         lastAtWall = now
         diag(c, "守护中断 ${gapMin} 分钟（第 $esc 次被结束）→ 扣除 $dockSec 秒、追加 $addQ 题")

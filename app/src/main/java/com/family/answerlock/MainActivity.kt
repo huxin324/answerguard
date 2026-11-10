@@ -29,18 +29,17 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 /**
- * 家长页（v3.0）：只留一个主按钮 + 一张使用须知。
+ * 家长页（v3.2）：只留一个主按钮 + 一张使用须知。
  *
  * 页面顺序：年级/间隔 → 出题设置 → 【大按钮】→ 使用须知（红色，教锁后台卡片）→ 状态 → 诊断
  *
- * 主按钮四态（一个按钮走完）：
- *   灰「▶ 开始守护」← 缺悬浮窗权限时点它自动跳权限页
- *   蓝「▶ 开始守护」← 就绪，点一下开始
- *   绿「🟢 守护中 · 点此停止」← 运行中
- *   红「■ 确认停止守护」← 连点两下才停，防误触
- *   停完短暂显示灰「已停止」，1.6 秒后回蓝。
+ * 主按钮三态（v3.2 起点一下就生效，不再要第二次确认）：
+ *   灰/蓝「▶ 开始守护」 ← 点一下就开始（缺悬浮窗会先带你开权限，回来自动继续）
+ *   绿「🟢 守护中 · 点此停止」 ← 点一下立刻停
+ *   停止后回到蓝，状态行提示「未启动」。
+ *   不用二次确认：守护中整页被家长密码锁层盖住，只有家长本人能点到这个按钮。
  *
- * 防清理的真实分工（v3.0 定案）：
+ * 防清理的真实分工：
  *   · 防上划/一键清理 = 最近任务卡片「下拉上锁」（唯一实测有效；App 无 API 可代设，
  *     所以第一次启动后自动弹一次 4 步图文，点「我锁好了」永久记住）。
  *   · 防卸载/防设置里强行停止 = 设备管理器，降级成使用须知里的一行可选开关，不再挡启动。
@@ -82,13 +81,6 @@ class MainActivity : AppCompatActivity() {
 
     /** 主按钮状态的缓存 key：只在状态真的变了才重刷配色，避免每秒重建 drawable */
     private var lastStartKey: String? = null
-
-    /** 守护中点了第一下「停止」：等第二下确认（4 秒内不点自动取消） */
-    private var stopArmed = false
-    private var stopArmUntil = 0L
-
-    /** 刚停止的 1.6 秒里按钮显示灰色「已停止」，之后回到蓝色 */
-    private var justStopped = false
 
     /** 本次进程内是否已用家长密码解锁设置页（守护运行时页面默认锁住） */
     private var unlocked = false
@@ -196,6 +188,14 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
         findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
+        // 语音自检：直接读一句话出来，并把「用的是什么引擎 / 中文能不能用」显示出来
+        findViewById<Button>(R.id.voiceTestBtn).setOnClickListener {
+            val oq = OverlayQuiz.get(this)
+            oq.testVoice()
+            uiHandler.postDelayed({
+                Toast.makeText(this, oq.voiceStatus(), Toast.LENGTH_LONG).show()
+            }, 1500)
+        }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
@@ -210,6 +210,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 跨天先重置今日额度（否则昨天用完了，今天一打开就是「今日时长已用完」）
+        GuardCore.rolloverIfNeeded(this)
         // 守护开着但服务死了（被系统杀/冻结）→ 打开 App 时立刻自动拉起
         if (prefs.getBoolean("guardOn", false) && !QuizService.running) {
             QuizService.resume(this)
@@ -227,13 +229,26 @@ class MainActivity : AppCompatActivity() {
      * 守护中断检测：进程被 force-stop 后没有任何办法自己活过来，
      * 但"被杀"这件事本身要留账 —— 下次打开 App 时把中断时长扣掉并追加惩罚题。
      * 阈值 3 分钟：短时间的系统抖动、息屏、授权跳转都不会误判。
+     *
+     * v3.2 关键修复：**跨天的中断一律不罚**。
+     * 原来昨天 22 点手机被杀、今天 8 点打开 App，中断时长按 10 小时算：
+     * 今日 30 分钟额度被一次性扣光 → 孩子还没玩就显示「今日时长已用完」（OPPO 上同一个问题）。
      */
     private fun checkGuardGap() {
         if (!prefs.getBoolean("guardOn", false)) return
         val last = prefs.getLong("lastBeatWall", 0L)
         if (last <= 0L) return
-        val gapMin = (System.currentTimeMillis() - last) / 60000L
+        val now = System.currentTimeMillis()
+        if (!GuardCore.sameDay(last, now)) return       // 隔夜不算逃课
+        val gapMin = (now - last) / 60000L
         if (gapMin < 3L) return
+        if (gapMin >= 120L) {
+            // 两小时以上没有心跳：多半是手机关机 / 一整天没碰，不该算成孩子逃课。
+            // 只把基准往前挪，不扣时长、不罚题（否则「今天刚打开就说时长用完」还会再来一次）。
+            prefs.edit().putLong("lastBeatWall", now).putLong("lastAtWall", now).apply()
+            lastStartKey = null
+            return
+        }
         GuardCore.onGapKilled(this, gapMin)
         lastStartKey = null
         Toast.makeText(
@@ -474,20 +489,25 @@ class MainActivity : AppCompatActivity() {
     private fun updateAll() {
         val on = prefs.getBoolean("guardOn", false)
         val remain = GuardCore.remaining(this)
-        statusTv.text = if (on) {
-            "🟢 守护运行中 · 今日剩余 %d 分 %02d 秒 · %d 秒后弹题"
+        val emg = GuardCore.emergencyLeftSec(this)
+        statusTv.text = when {
+            !on -> "⚪ 未启动 · 选好年级和间隔，点上面的「开始守护」即可"
+            emg > 0 -> "🆘 紧急解锁中 · 还有 %d 分 %02d 秒恢复弹题 · 今日剩余 %d 分"
+                .format(emg / 60, emg % 60, remain / 60)
+            else -> "🟢 守护运行中 · 今日剩余 %d 分 %02d 秒 · %d 秒后弹题"
                 .format(remain / 60, remain % 60, GuardCore.nextInSec(this))
-        } else {
-            "⚪ 未启动 · 选好年级和间隔，点上面的「开始守护」即可"
         }
 
         val total = prefs.getInt("total", 0)
         val ok = prefs.getInt("ok", 0)
         val escape = prefs.getInt("escapes", 0)
+        val emgCount = prefs.getInt("emgCount", 0)
         val stats = if (total == 0) "答题统计：还没有答过题"
         else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
         val escTxt = if (escape > 0) "\n被强行结束时追加惩罚：$escape 次" else ""
-        diagTv.text = "v3.1\n${selfCheck()}\n${beatText()}\n$stats$escTxt\n" +
+        val emgTxt = if (emgCount > 0) "\n家长紧急解锁：$emgCount 次" else ""
+        diagTv.text = "v3.2\n${selfCheck()}\n${beatText()}\n$stats$escTxt$emgTxt\n" +
+            "语音：${OverlayQuiz.get(this).voiceStatus()}\n" +
             "上次动作：${prefs.getString("diag", "还没启动过")}"
         updateHint()
         refreshStartBtn()
@@ -495,28 +515,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 唯一主按钮的四态（v3.0）：
-     *   灰 → 蓝「开始守护」→ 点 → 绿「守护中·点此停止」→ 点 → 红「确认停止」
-     *   → 点 → 灰「已停止」→ 1.6 秒后回到蓝。
+     * 唯一主按钮（v3.2 简化为「点一下开始 / 点一下停止」）：
+     *   灰＝还缺悬浮窗权限（点它会先带你去开）· 蓝＝就绪 · 绿＝守护中。
      *
-     * 说明：灰色只表示「还不能开始」（缺悬浮窗权限，或刚停止），此时点它会自动
-     * 把家长送到权限页并记住这次意图，回来就自动接着启动 —— 不用点第二次。
-     * 设备管理器（防卸载）降级为使用须知里的一行可选开关，不再挡启动流程。
+     * 为什么可以去掉二次确认：守护运行时整页被家长密码锁层盖住，
+     * 孩子根本点不到这个按钮；能点到的人一定已经输过家长密码。
      */
     private fun refreshStartBtn() {
         val on = prefs.getBoolean("guardOn", false)
         val overlayOk = Settings.canDrawOverlays(this)
         val remain = GuardCore.remaining(this)
+        val emg = GuardCore.emergencyLeftSec(this)
 
-        val key = "$on|$overlayOk|$stopArmed|$justStopped|${remain / 60}"
+        val key = "$on|$overlayOk|${remain / 60}|${emg / 10}"
         if (lastStartKey == key) return   // 状态没变就别每秒钟重建一次背景
         lastStartKey = key
 
         when {
-            on && stopArmed -> {
-                startBtn.text = "■ 确认停止守护"
-                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E5484D"))
-                startHintTv.text = "再点一次就停下来（4 秒内不点会自动取消）"
+            on && emg > 0 -> {
+                startBtn.text = "🟢 守护中 · 点此停止"
+                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#0FA968"))
+                startHintTv.text = "🆘 紧急解锁中：还有 ${emg / 60} 分 ${emg % 60} 秒恢复弹题"
                 startHintTv.visibility = View.VISIBLE
             }
             on -> {
@@ -524,16 +543,10 @@ class MainActivity : AppCompatActivity() {
                 startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#0FA968"))
                 startHintTv.visibility = View.GONE
             }
-            justStopped -> {
-                startBtn.text = "已停止"
-                startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#C9CEDA"))
-                startHintTv.text = "已停止 · 孩子现在可以正常玩了"
-                startHintTv.visibility = View.VISIBLE
-            }
             overlayOk -> {
                 startBtn.text = "▶ 开始守护"
                 startBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#2F6BFF"))
-                startHintTv.text = "点一下就好，缺的权限会自动带你逐项打开"
+                startHintTv.text = "点一下就开始，缺的权限会自动带你逐项打开"
                 startHintTv.visibility = View.VISIBLE
             }
             else -> {
@@ -554,39 +567,14 @@ class MainActivity : AppCompatActivity() {
         adminLine.setTextColor(Color.parseColor(if (adminOn) "#0B7A4B" else "#B26A00"))
     }
 
-    /** 主按钮点击：一个按钮走完开始 / 停止，颜色跟着变 */
+    /** 主按钮点击：点一下开始，再点一下就停（v3.2 去掉二次确认） */
     private fun onMainButton() {
-        val on = prefs.getBoolean("guardOn", false)
-
-        if (on) {
-            // 守护中：第一下变成红色确认，第二下才真停（防孩子/家长误点）
-            if (!stopArmed) {
-                stopArmed = true
-                stopArmUntil = System.currentTimeMillis() + 4000L
-                lastStartKey = null
-                refreshStartBtn()
-                Toast.makeText(this, "再点一次「确认停止守护」就停下来", Toast.LENGTH_SHORT).show()
-                uiHandler.postDelayed({
-                    if (stopArmed && System.currentTimeMillis() >= stopArmUntil) {
-                        stopArmed = false
-                        lastStartKey = null
-                        refreshStartBtn()
-                    }
-                }, 4300)
-                return
-            }
-            stopArmed = false
+        if (prefs.getBoolean("guardOn", false)) {
             pendingStart = false
-            justStopped = true
             QuizService.stop(this)
             lastStartKey = null
             updateAll()
-            Toast.makeText(this, "已停止守护", Toast.LENGTH_SHORT).show()
-            uiHandler.postDelayed({
-                justStopped = false
-                lastStartKey = null
-                refreshStartBtn()
-            }, 1600)
+            Toast.makeText(this, "已停止守护（孩子现在可以正常玩了）", Toast.LENGTH_SHORT).show()
             return
         }
 

@@ -42,6 +42,10 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         /** 选项落盘用的分隔符（题干里不会出现） */
         private const val SEP_OPT = "\u0001"
 
+        /** 「测试语音讲解」读的那句话 */
+        private const val TEST_SENTENCE =
+            "语音讲解已开启。答错的时候，我会把这道题的解题思路读给你听。"
+
         @Volatile private var inst: OverlayQuiz? = null
 
         /** 是否正在显示答题/锁屏窗（计时会暂停） */
@@ -63,6 +67,11 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     private var root: FrameLayout? = null
     private var quizBox: View? = null
     private var lockBox: View? = null
+    private var quizPanel: View? = null
+    private var emergencyBtn: TextView? = null
+    private var emgBox: View? = null
+    private var emgPwd: EditText? = null
+    private var emgErrTv: TextView? = null
     private var subjectTv: TextView? = null
     private var penaltyTv: TextView? = null
     private var timerTv: TextView? = null
@@ -73,10 +82,24 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     private var replayBtn: Button? = null
     private var pwdEt: EditText? = null
 
+    /* ---------- 紧急解锁状态 ---------- */
+    /** 打开密码面板时暂停倒计时，取消后从原处继续 */
+    private var emgOpen = false
+    private var emgLeftSec = 0
+    /** 这一题还剩多少秒（每次 onTick 更新） */
+    private var leftSec = 0
+    /** 连续输错密码的次数 / 暂时禁止再试的时间点（防孩子穷举） */
+    private var emgWrong = 0
+    private var emgBlockUntil = 0L
+
     /* ---------- 音效 / 语音 ---------- */
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var ttsInitTried = false
+    /** 语音引擎诊断信息（家长页「测试语音」直接显示，用来判断是没引擎还是没中文数据） */
+    private var ttsInfo = "未初始化"
+    /** 点了「测试语音」但引擎还在初始化 → 就绪后立刻朗读 */
+    private var testPending = false
     private var soundPool: SoundPool? = null
     private var sndOk = 0
     private var sndNo = 0
@@ -139,6 +162,11 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         root = v
         quizBox = v.findViewById(R.id.quizBox)
         lockBox = v.findViewById(R.id.lockBox)
+        quizPanel = v.findViewById(R.id.quizPanel)
+        emergencyBtn = v.findViewById(R.id.emergencyBtn)
+        emgBox = v.findViewById(R.id.emgBox)
+        emgPwd = v.findViewById(R.id.emgPwd)
+        emgErrTv = v.findViewById(R.id.emgErrTv)
         subjectTv = v.findViewById(R.id.subjectTv)
         penaltyTv = v.findViewById(R.id.penaltyTv)
         timerTv = v.findViewById(R.id.timerTv)
@@ -149,6 +177,16 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         replayBtn = v.findViewById(R.id.replayBtn)
         pwdEt = v.findViewById(R.id.lockPwd)
 
+        // 每次重新弹窗都从「干净状态」开始（上一轮的密码面板不能留着）
+        emgOpen = false
+        emgWrong = 0
+        emgBox?.visibility = View.GONE
+        quizPanel?.visibility = View.VISIBLE
+
+        emergencyBtn?.setOnClickListener { openEmergencyPanel() }
+        v.findViewById<Button>(R.id.emgCancelBtn)?.setOnClickListener { closeEmergencyPanel() }
+        v.findViewById<Button>(R.id.emgOkBtn)?.setOnClickListener { tryEmergencyUnlock() }
+
         // 吃掉返回键 + 吃掉所有触摸（不让点击漏到底下的 App）
         v.isFocusable = true
         v.isFocusableInTouchMode = true
@@ -157,9 +195,17 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         v.setOnKeyListener { _, keyCode, _ -> keyCode == KeyEvent.KEYCODE_BACK }
 
         replayBtn?.setOnClickListener {
+            if (!ttsReady) {
+                // 直接告诉孩子/家长为什么没声音，而不是点了没反应
+                Toast.makeText(
+                    ctx,
+                    "这台手机没有可用的中文语音包，语音讲解读不出来（讲解看下面的文字即可）",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
             speak(lastExplain)
-            if (prefs.getBoolean("voice", true) && ttsReady)
-                scheduleNext((lastExplain.length * 300L + 3000L).coerceAtMost(60_000L))
+            scheduleNext((lastExplain.length * 300L + 3000L).coerceAtMost(60_000L))
         }
 
         try {
@@ -265,6 +311,77 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         })
     }
 
+    /* ================= 紧急解锁（家长按，孩子不知道密码就过不去） ================= */
+
+    /**
+     * 弹题窗右上角的「🆘 紧急解锁」。
+     *
+     * 场景：家长正在用手机办事、要接电话、要扫码付钱，这时候被弹题卡住很难受。
+     * 点一下 → 让家长输家长密码 → 输对就立刻关掉弹题窗、本轮题目作废，
+     * 并且接下来 10 分钟不弹题、也不扣今日时长（这段时间是家长在用手机）。
+     */
+    private fun openEmergencyPanel() {
+        if (emgOpen) return
+        emgOpen = true
+        emgLeftSec = leftSec.coerceAtLeast(5)
+        answerTimer?.cancel()            // 输密码期间倒计时先停住，避免「输密码输到超时算答错」
+        answerTimer = null
+        ui.removeCallbacks(nextRunnable) // 也别在这时候自动跳下一题
+        emgErrTv?.visibility = View.GONE
+        emgPwd?.setText("")
+        quizPanel?.visibility = View.GONE
+        emgBox?.visibility = View.VISIBLE
+        emgPwd?.requestFocus()
+    }
+
+    /** 取消：回到题目，倒计时从刚才暂停的地方继续 */
+    private fun closeEmergencyPanel() {
+        if (!emgOpen) return
+        emgOpen = false
+        emgBox?.visibility = View.GONE
+        quizPanel?.visibility = View.VISIBLE
+        val answered = !feedbackTv?.text.isNullOrBlank()
+        if (answered) {
+            // 刚才已经答错、正在看讲解 → 重新排一次「跳下一题」
+            ui.postDelayed(nextRunnable, 3000)
+        } else if (cur != null) {
+            startTimer(emgLeftSec.coerceAtLeast(5))
+        }
+    }
+
+    private fun tryEmergencyUnlock() {
+        val now = System.currentTimeMillis()
+        if (now < emgBlockUntil) {
+            val s = ((emgBlockUntil - now) / 1000L + 1L).toInt()
+            emgErrTv?.text = "错误次数太多，请 $s 秒后再试"
+            emgErrTv?.visibility = View.VISIBLE
+            return
+        }
+        val pwd = prefs.getString("pwd", "1234") ?: "1234"
+        if (emgPwd?.text?.toString() == pwd) {
+            emgOpen = false
+            GuardCore.startEmergency(ctx, GuardCore.EMERGENCY_MIN, "弹题窗 ↗ 紧急解锁")
+            Toast.makeText(
+                ctx,
+                "✅ 已紧急解锁：本轮题目作废，${GuardCore.EMERGENCY_MIN} 分钟内不弹题",
+                Toast.LENGTH_LONG
+            ).show()
+            close()
+            return
+        }
+        // 输错：连错 3 次锁 60 秒，防止孩子在这儿穷举密码
+        emgWrong++
+        if (emgWrong >= 3) {
+            emgWrong = 0
+            emgBlockUntil = now + 60_000L
+            emgErrTv?.text = "密码错误 3 次，请 60 秒后再试"
+        } else {
+            emgErrTv?.text = "密码不对，还可以再试 ${3 - emgWrong} 次"
+        }
+        emgErrTv?.visibility = View.VISIBLE
+        emgPwd?.setText("")
+    }
+
     /** 关闭弹窗：亲子答对 / 家长解锁 / 服务销毁 */
     fun close() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -362,9 +479,17 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         }
 
         answerTimer?.cancel()
+        startTimer(startSec)
+    }
+
+    /** 倒计时（抽出来是因为「紧急解锁 → 取消」要从暂停的地方接着走） */
+    private fun startTimer(startSec: Int) {
+        leftSec = startSec
+        answerTimer?.cancel()
         answerTimer = object : CountDownTimer(startSec * 1000L, 500) {
             override fun onTick(ms: Long) {
                 val s = ms / 1000 + 1
+                leftSec = s.toInt()
                 val txt = if (s >= 60) "${s / 60} 分 ${s % 60} 秒" else "$s 秒"
                 timerTv?.text = "⏳ 剩余作答时间：$txt（超时算答错）"
                 // 每 5 秒把剩余秒数落盘，被划掉重弹时接着倒计时
@@ -445,7 +570,8 @@ class OverlayQuiz private constructor(private val ctx: Context) {
             val fallback = speakDelayMs + (explain.length * 300L + 3000L).coerceAtMost(60_000L)
             scheduleNext(fallback)
         } else {
-            ui.postDelayed(nextRunnable, 2600)
+            // 没有语音（家长关掉了 / 手机没中文语音包）→ 多留几秒让孩子把讲解看完
+            ui.postDelayed(nextRunnable, if (prefs.getBoolean("voice", true)) 5200 else 2600)
         }
     }
 
@@ -507,47 +633,102 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         } catch (e: Exception) { /* 没音效也能答题 */ }
     }
 
+    /**
+     * 初始化语音引擎。
+     *
+     * v3.2 修的「语音讲解一直没声音」：
+     * ① AndroidManifest 缺 `<queries><intent action=TTS_SERVICE>`：安卓 11 起有「软件包可见性」
+     *    限制，不加这段 App 根本看不到系统里的语音引擎，TextToSpeech 初始化直接失败且不弹错。
+     * ② 没显式指定音频通道：个别 ROM（华为/OPPO）会把 TTS 丢到被静音的通道上，
+     *    表现就是「不报错、也没声音」。这里改成媒体通道 + 语音内容。
+     * ③ 原来初始化失败一次就永久放弃，现在失败会重试，并把原因写到诊断里。
+     */
     private fun initTts() {
         if (tts != null || ttsInitTried) return
         ttsInitTried = true
         try {
-            tts = TextToSpeech(ctx) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    val r = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                    ttsReady = if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        val r2 = tts?.setLanguage(Locale.CHINA)
-                        r2 != TextToSpeech.LANG_MISSING_DATA && r2 != TextToSpeech.LANG_NOT_SUPPORTED
-                    } else true
-
-                    tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(id: String?) {}
-                        override fun onDone(id: String?) {
-                            if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
-                        }
-
-                        @Deprecated("Deprecated in Java")
-                        override fun onError(id: String?) {
-                            if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
-                        }
-                    })
-                    if (!ttsReady) GuardCore.diag(ctx, "语音引擎不支持中文，将只用文字讲解")
-                } else {
-                    ttsReady = false
-                    ttsInitTried = false   // 允许下次弹题时重试
-                    GuardCore.diag(ctx, "语音引擎初始化失败，将只用文字讲解")
-                }
-            }
-        } catch (e: Exception) {
+            tts = TextToSpeech(ctx) { status -> onTtsInit(status) }
+        } catch (e: Throwable) {
             ttsReady = false
+            ttsInitTried = false
+            ttsInfo = "引擎创建失败：${e.javaClass.simpleName}"
+            GuardCore.diag(ctx, "语音引擎创建失败：${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun onTtsInit(status: Int) {
+        val t = tts
+        if (status != TextToSpeech.SUCCESS || t == null) {
+            ttsReady = false
+            ttsInitTried = false          // 允许下次弹题时重试
+            ttsInfo = "初始化失败（code=$status）"
+            GuardCore.diag(ctx, "语音引擎初始化失败 code=$status，只能用文字讲解")
+            return
+        }
+
+        try {
+            t.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+        } catch (e: Throwable) { /* 老引擎不支持就跳过 */ }
+
+        // 中文优先，逐级退让；全都不可用说明这台手机没装中文语音数据
+        var r = t.setLanguage(Locale.SIMPLIFIED_CHINESE)
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+            r = t.setLanguage(Locale.CHINESE)
+        }
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+            r = t.setLanguage(Locale.getDefault())
+        }
+        ttsReady = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+
+        val engine = try { t.defaultEngine ?: "未知引擎" } catch (e: Throwable) { "未知引擎" }
+        ttsInfo = if (ttsReady) "引擎 $engine · 中文可用" else "引擎 $engine · 没有中文语音数据"
+
+        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String?) {}
+
+            override fun onDone(id: String?) {
+                if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(id: String?) {
+                if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
+            }
+
+            override fun onError(id: String?, errorCode: Int) {
+                GuardCore.diag(ctx, "语音朗读出错 code=$errorCode")
+                if (id == UTTER_EXPLAIN) ui.post { onSpeakFinished() }
+            }
+        })
+
+        GuardCore.diag(ctx, "语音引擎就绪：$ttsInfo")
+        if (testPending) {
+            testPending = false
+            speak(TEST_SENTENCE)
         }
     }
 
     private fun speak(text: String) {
-        if (ttsReady) {
-            try {
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), UTTER_EXPLAIN)
-            } catch (e: Exception) { /* 朗读失败不阻塞跳题 */ }
-        }
+        if (!ttsReady) return            // 没引擎/没中文数据：文字讲解照常显示
+        try {
+            val r = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), UTTER_EXPLAIN)
+            if (r == TextToSpeech.ERROR) GuardCore.diag(ctx, "朗读被引擎拒绝（ERROR）")
+        } catch (e: Exception) { /* 朗读失败不阻塞跳题 */ }
+    }
+
+    /** 家长页自检用：现在到底能不能出声、用的是什么引擎 */
+    fun voiceStatus(): String =
+        if (ttsReady) "✅ 语音正常（$ttsInfo）" else "❌ $ttsInfo（讲解只能看文字）"
+
+    /** 家长页「测试语音讲解」：引擎还在初始化就等它好了再读 */
+    fun testVoice() {
+        initTts()
+        if (ttsReady) speak(TEST_SENTENCE) else testPending = true
     }
 
     private fun playTone(ok: Boolean) {

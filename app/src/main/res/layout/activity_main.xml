@@ -334,7 +334,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="7dp"
                     android:lineSpacingExtra="4dp"
-                    android:text="1 · 点上面的大按钮开始守护，缺的系统权限会自动带你一项一项打开，回来自动继续，不用自己找。\n2 · 启动后会教你把后台卡片锁住（只需一次）：从屏幕底部上滑并停住 → 找到「答题守护」→ 按住卡片往下拉 → 点 🔒。\n3 · 锁好之后：上划划不掉、一键清理也清不掉；孩子点开卡片只能看到家长密码屏。\n4 · 换手机、重装 App 才需要重新锁一次。"
+                    android:text="1 · 点上面的大按钮开始守护，缺的系统权限会自动带你一项一项打开，回来自动继续；再点一下就停止。\n2 · 启动后会教你把后台卡片锁住（只需一次）：从屏幕底部上滑并停住 → 找到「答题守护」→ 按住卡片往下拉 → 点 🔒。\n3 · 锁好之后：上划划不掉、一键清理也清不掉；孩子点开卡片只能看到家长密码屏。\n4 · 你急用手机时：弹题窗右上角有「🆘 紧急解锁」，输家长密码就跳过，10 分钟内不弹题也不计时长。\n5 · 换手机、重装 App 才需要重新锁一次。"
                     android:textColor="#8C4038"
                     android:textSize="12.5sp" />
 
@@ -418,6 +418,15 @@
                     android:backgroundTint="#E6F7EE"
                     android:text="⚡ 10 秒后弹题（快速验证）"
                     android:textColor="#0B7A4B" />
+
+                <Button
+                    android:id="@+id/voiceTestBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#EEF2FF"
+                    android:text="🔊 测试语音讲解（听听有没有声音）"
+                    android:textColor="#2F6BFF" />
 
                 <Button
                     android:id="@+id/huaweiBtn"
