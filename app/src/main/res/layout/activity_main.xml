@@ -164,14 +164,6 @@
                         android:textSize="14sp" />
                 </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/voiceChk"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checked="true"
-                    android:text="🔊 答错时语音讲解"
-                    android:textSize="14sp" />
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -418,15 +410,6 @@
                     android:backgroundTint="#E6F7EE"
                     android:text="⚡ 10 秒后弹题（快速验证）"
                     android:textColor="#0B7A4B" />
-
-                <Button
-                    android:id="@+id/voiceTestBtn"
-                    android:layout_width="match_parent"
-                    android:layout_height="46dp"
-                    android:layout_marginTop="8dp"
-                    android:backgroundTint="#EEF2FF"
-                    android:text="🔊 测试语音讲解（听听有没有声音）"
-                    android:textColor="#2F6BFF" />
 
                 <Button
                     android:id="@+id/huaweiBtn"

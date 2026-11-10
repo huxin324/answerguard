@@ -164,6 +164,10 @@ object GuardCore {
             .putLong("lastBeatWall", now)
             .putString("dayKey", todayCached(now))
             .putLong("emergencyUntil", 0L)
+            // v3.5 关键修复「一开守护就弹题」：清掉上一轮残留的弹题账
+            // （overlayOpen=true 会让服务一创建就当「逃逸」重弹没答完的题）
+            .putBoolean("overlayOpen", false)
+            .putString("overlayMode", "")
             .putBoolean("guardOn", true)
             .apply()
         lastAtWall = now

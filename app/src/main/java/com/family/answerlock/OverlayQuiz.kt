@@ -123,6 +123,9 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     private val UTTER_EXPLAIN = "explain"
     private val WRONG_SOUND_MS = 500L
 
+    /** 错题解答的停留时长（v3.5 家长定）：10 秒看完再跳下一题 */
+    private val EXPLAIN_STAY_MS = 10_000L
+
     /** 弹窗关闭回调（GuardCore 用它重启计时） */
     var onClosed: (() -> Unit)? = null
 
@@ -131,7 +134,7 @@ class OverlayQuiz private constructor(private val ctx: Context) {
     /** 启动守护时就调用：把语音引擎和音效准备好，弹题时才不会「没声音」 */
     fun warmup() {
         initSound()
-        initTts()
+        // v3.5 语音播报取消：不再初始化 TTS 引擎（省电省内存，tts 相关代码保留备用）
     }
 
     /* ================= 弹窗 ================= */
@@ -200,29 +203,7 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         v.isClickable = true
         v.setOnClickListener { }
         v.setOnKeyListener { _, keyCode, _ -> keyCode == KeyEvent.KEYCODE_BACK }
-
-        replayBtn?.setOnClickListener {
-            if (!ttsReady) {
-                // v3.3：再试一次（可能是刚装好语音包，或需要重新探测别的引擎）
-                initTts()
-                if (ttsReady) {
-                    speak(lastExplain)
-                } else if (ttsSettled) {
-                    // 探测过了还是不行 → 直接带去装语音包
-                    openVoiceSettings()
-                } else {
-                    testPending = true
-                    Toast.makeText(
-                        ctx,
-                        "正在找能说中文的语音引擎…找到后会自动朗读",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                return@setOnClickListener
-            }
-            speak(lastExplain)
-            scheduleNext((lastExplain.length * 300L + 3000L).coerceAtMost(60_000L))
-        }
+        // v3.5 语音播报取消：「再听一遍讲解」按钮永久隐藏（讲解只看文字）
 
         try {
             val lp = WindowManager.LayoutParams(
@@ -613,25 +594,21 @@ class OverlayQuiz private constructor(private val ctx: Context) {
         )
     }
 
-    /** 错题讲解：文字 + 语音，语音读完才跳下一题 */
+    /**
+     * 错题/超时讲解（v3.5 取消语音播报，家长要求）：
+     * 只显示文字解答，停留 10 秒后自动跳下一题——太短看不完，太长孩子干等。
+     * 答错音效仍保留（在调用方先响一声）。
+     */
     private fun showExplain(feedback: String, explain: String, speakDelayMs: Long = 0L) {
         feedbackTv?.text = feedback
         lastExplain = explain
         explainTv?.text = "📖 错题讲解：$explain"
         explainTv?.visibility = View.VISIBLE
-        replayBtn?.visibility = View.VISIBLE
+        replayBtn?.visibility = View.GONE      // 语音取消，「再听一遍」按钮不再出现
 
         speakRunnable?.let { ui.removeCallbacks(it) }
-        if (prefs.getBoolean("voice", true) && ttsReady) {
-            speakRunnable = Runnable { speak(explain) }
-            ui.postDelayed(speakRunnable!!, speakDelayMs)
-            // 兜底：万一系统没回调 onDone，按字数估时长跳题（上限 60 秒）
-            val fallback = speakDelayMs + (explain.length * 300L + 3000L).coerceAtMost(60_000L)
-            scheduleNext(fallback)
-        } else {
-            // 没有语音（家长关掉了 / 手机没中文语音包）→ 多留几秒让孩子把讲解看完
-            ui.postDelayed(nextRunnable, if (prefs.getBoolean("voice", true)) 5200 else 2600)
-        }
+        speakRunnable = null
+        scheduleNext(EXPLAIN_STAY_MS)
     }
 
     private fun onSpeakFinished() {

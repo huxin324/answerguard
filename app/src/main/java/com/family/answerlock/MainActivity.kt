@@ -63,7 +63,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chkMath: CheckBox
     private lateinit var chkChinese: CheckBox
     private lateinit var chkEnglish: CheckBox
-    private lateinit var voiceChk: CheckBox
     private lateinit var statusTv: TextView
     private lateinit var autoTv: TextView
     private lateinit var diagTv: TextView
@@ -117,8 +116,6 @@ class MainActivity : AppCompatActivity() {
         chkMath = findViewById(R.id.chkMath)
         chkChinese = findViewById(R.id.chkChinese)
         chkEnglish = findViewById(R.id.chkEnglish)
-        voiceChk = findViewById(R.id.voiceChk)
-        voiceChk.isChecked = prefs.getBoolean("voice", true)
         pwdEt.setText(prefs.getString("pwd", "1234"))
         statusTv = findViewById(R.id.statusTv)
         autoTv = findViewById(R.id.autoTv)
@@ -188,15 +185,6 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.fixBtn).setOnClickListener { fixNext() }
         findViewById<Button>(R.id.huaweiBtn).setOnClickListener { openHuaweiStartup() }
-        // 语音自检：直接读一句话出来，并把「用的是什么引擎 / 中文能不能用」显示出来
-        findViewById<Button>(R.id.voiceTestBtn).setOnClickListener {
-            val oq = OverlayQuiz.get(this)
-            oq.testVoice()
-            // 引擎探测是异步的（可能要逐个试好几个引擎），多等一会儿再报状态
-            uiHandler.postDelayed({
-                Toast.makeText(this, oq.voiceStatus(), Toast.LENGTH_LONG).show()
-            }, 3000)
-        }
         findViewById<Button>(R.id.test10Btn).setOnClickListener {
             saveConfig()
             prefs.edit().putInt("intervalSec", 10).apply()
@@ -303,7 +291,6 @@ class MainActivity : AppCompatActivity() {
             .putInt("penalty", penaltySp.selectedItemPosition + 1)
             .putInt("dailyMin", dailyValues[dailySp.selectedItemPosition])
             .putString("subjects", subs.joinToString(","))
-            .putBoolean("voice", voiceChk.isChecked)
             .putString("pwd", if (pwdEt.text.isNullOrBlank()) "1234" else pwdEt.text.toString())
             .apply()
     }
@@ -406,9 +393,12 @@ class MainActivity : AppCompatActivity() {
 
         // 权限齐了 → 启动守护
         pendingStart = false
+        // v3.5 关键修复「一开守护就弹题」：必须在服务起来**之前**先跑 bootstrap——
+        // 重置计时基准（lastAtWall=现在）+ 清掉上轮残留的弹题账（overlayOpen）。
+        // 之前是先落 guardOn=true 让按钮变绿，结果服务以为「守护早就在跑」，
+        // 跳过了 bootstrap，用的还是上次守护的旧基准 → 一开就算「到点」立刻弹题。
+        GuardCore.bootstrap(this)
         QuizService.start(this)
-        // 服务是异步启动的，先落一个标记，让按钮「立刻」变绿（服务里 bootstrap 会再写一次）
-        prefs.edit().putBoolean("guardOn", true).apply()
         lastStartKey = null
         updateAll()
         val firstStart = !prefs.getBoolean("taskLocked", false)
@@ -507,8 +497,7 @@ class MainActivity : AppCompatActivity() {
         else "答题统计：$total 题 · 答对 $ok · 正确率 ${ok * 100 / total}%"
         val escTxt = if (escape > 0) "\n被强行结束时追加惩罚：$escape 次" else ""
         val emgTxt = if (emgCount > 0) "\n家长紧急解锁：$emgCount 次" else ""
-        diagTv.text = "v3.4\n${selfCheck()}\n${beatText()}\n$stats$escTxt$emgTxt\n" +
-            "语音：${OverlayQuiz.get(this).voiceStatus()}\n" +
+        diagTv.text = "v3.5\n${selfCheck()}\n${beatText()}\n$stats$escTxt$emgTxt\n" +
             "上次动作：${prefs.getString("diag", "还没启动过")}"
         updateHint()
         refreshStartBtn()
